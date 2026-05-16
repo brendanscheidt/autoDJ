@@ -1,0 +1,575 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autodj.analyzed-track.v1",
+  "title": "AutoDJ AnalyzedTrack v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "trackId",
+    "source",
+    "analyzer",
+    "durationSeconds",
+    "tempo",
+    "key",
+    "beatGrid",
+    "sections",
+    "energy",
+    "vocals",
+    "cuePoints",
+    "quality"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "trackId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "$ref": "#/$defs/trackAsset"
+    },
+    "analyzer": {
+      "$ref": "#/$defs/analyzerProvenance"
+    },
+    "durationSeconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "tempo": {
+      "$ref": "#/$defs/tempoAnalysis"
+    },
+    "key": {
+      "$ref": "#/$defs/keyAnalysis"
+    },
+    "beatGrid": {
+      "$ref": "#/$defs/beatGrid"
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trackSection"
+      }
+    },
+    "energy": {
+      "$ref": "#/$defs/energyAnalysis"
+    },
+    "vocals": {
+      "$ref": "#/$defs/vocalAnalysis"
+    },
+    "stems": {
+      "$ref": "#/$defs/stemSet"
+    },
+    "cuePoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/cuePoint"
+      }
+    },
+    "quality": {
+      "$ref": "#/$defs/analysisQuality"
+    }
+  },
+  "$defs": {
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "timeSeconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "trackAsset": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "trackId",
+        "repositoryId",
+        "sourceUri"
+      ],
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "artist": {
+          "type": "string"
+        },
+        "album": {
+          "type": "string"
+        },
+        "durationSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "sampleRate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "analyzerProvenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "producer",
+        "producerVersion",
+        "createdAtUtc"
+      ],
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "producerVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "createdAtUtc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sourceContentHash": {
+          "type": "string"
+        },
+        "parametersHash": {
+          "type": "string"
+        }
+      }
+    },
+    "tempoAnalysis": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "bpm",
+        "normalizedBpm",
+        "confidence"
+      ],
+      "properties": {
+        "bpm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "normalizedBpm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "tempoClass": {
+          "enum": [
+            "halftime",
+            "straight",
+            "doubletime"
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "bpm",
+              "confidence"
+            ],
+            "properties": {
+              "bpm": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "confidence": {
+                "$ref": "#/$defs/confidence"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyAnalysis": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "tonic",
+        "mode",
+        "confidence"
+      ],
+      "properties": {
+        "tonic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "major",
+            "minor",
+            "unknown"
+          ]
+        },
+        "camelot": {
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "tonic",
+              "mode",
+              "confidence"
+            ],
+            "properties": {
+              "tonic": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mode": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence": {
+                "$ref": "#/$defs/confidence"
+              }
+            }
+          }
+        }
+      }
+    },
+    "beatGrid": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "beats",
+        "downbeats",
+        "confidence"
+      ],
+      "properties": {
+        "beats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/beatMarker"
+          }
+        },
+        "downbeats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/beatMarker"
+          }
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "beatMarker": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "index",
+        "timeSeconds"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "beatInBar": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "trackSection": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "type",
+        "startSeconds",
+        "endSeconds",
+        "confidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "intro",
+            "verse",
+            "build",
+            "drop",
+            "breakdown",
+            "bridge",
+            "outro",
+            "unknown"
+          ]
+        },
+        "startSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "endSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "startBeatIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endBeatIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "energyMean": {
+          "$ref": "#/$defs/confidence"
+        },
+        "energyPeak": {
+          "$ref": "#/$defs/confidence"
+        },
+        "vocalPresence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        }
+      }
+    },
+    "energyAnalysis": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "globalEnergy",
+        "curve"
+      ],
+      "properties": {
+        "globalEnergy": {
+          "$ref": "#/$defs/confidence"
+        },
+        "curve": {
+          "$ref": "#/$defs/timeValueCurve"
+        },
+        "bassEnergyCurve": {
+          "$ref": "#/$defs/timeValueCurve"
+        },
+        "onsetDensityCurve": {
+          "$ref": "#/$defs/timeValueCurve"
+        }
+      }
+    },
+    "timeValueCurve": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "timeSeconds",
+          "value"
+        ],
+        "properties": {
+          "timeSeconds": {
+            "$ref": "#/$defs/timeSeconds"
+          },
+          "value": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "vocalAnalysis": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "hasVocals",
+        "confidence",
+        "regions"
+      ],
+      "properties": {
+        "hasVocals": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "startSeconds",
+              "endSeconds",
+              "presence",
+              "confidence"
+            ],
+            "properties": {
+              "startSeconds": {
+                "$ref": "#/$defs/timeSeconds"
+              },
+              "endSeconds": {
+                "$ref": "#/$defs/timeSeconds"
+              },
+              "presence": {
+                "$ref": "#/$defs/confidence"
+              },
+              "confidence": {
+                "$ref": "#/$defs/confidence"
+              }
+            }
+          }
+        }
+      }
+    },
+    "stemSet": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "producer",
+        "producerVersion",
+        "stems"
+      ],
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "producerVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stems": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "vocals": {
+              "type": "string"
+            },
+            "drums": {
+              "type": "string"
+            },
+            "bass": {
+              "type": "string"
+            },
+            "other": {
+              "type": "string"
+            },
+            "instrumental": {
+              "type": "string"
+            }
+          }
+        },
+        "quality": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "vocalBleedEstimate": {
+              "$ref": "#/$defs/confidence"
+            },
+            "artifactEstimate": {
+              "$ref": "#/$defs/confidence"
+            }
+          }
+        }
+      }
+    },
+    "cuePoint": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "type",
+        "timeSeconds",
+        "confidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "mix_in",
+            "mix_out",
+            "drop",
+            "build_start",
+            "breakdown_start",
+            "vocal_start",
+            "vocal_end",
+            "loop_candidate"
+          ]
+        },
+        "timeSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "beatIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sectionId": {
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "analysisQuality": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "overallConfidence",
+        "warnings"
+      ],
+      "properties": {
+        "overallConfidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

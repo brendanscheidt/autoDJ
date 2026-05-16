@@ -1,0 +1,216 @@
+{
+  "schemaVersion": "1.0.0",
+  "trackId": "track-stub-a",
+  "source": {
+    "trackId": "track-stub-a",
+    "repositoryId": "local-dubstep-stub-repo",
+    "sourceUri": "fixture://autodj/local-dubstep-stubs/track-stub-a",
+    "contentHash": "sha256:stub-track-a",
+    "title": "Stub Build Into Drop",
+    "artist": "AutoDJ Fixture",
+    "durationSeconds": 180.0,
+    "sampleRate": 44100,
+    "channels": 2
+  },
+  "analyzer": {
+    "producer": "autodj.analysis.stub",
+    "producerVersion": "0.1.0",
+    "createdAtUtc": "2026-01-01T00:00:00Z",
+    "sourceContentHash": "sha256:stub-track-a",
+    "parametersHash": "sha256:stub-parameters"
+  },
+  "durationSeconds": 180.0,
+  "tempo": {
+    "bpm": 140.0,
+    "normalizedBpm": 140.0,
+    "confidence": 1.0,
+    "tempoClass": "straight",
+    "candidates": [
+      {
+        "bpm": 140.0,
+        "confidence": 1.0
+      },
+      {
+        "bpm": 70.0,
+        "confidence": 0.7
+      }
+    ]
+  },
+  "key": {
+    "tonic": "F",
+    "mode": "minor",
+    "camelot": "4A",
+    "confidence": 0.8,
+    "candidates": [
+      {
+        "tonic": "F",
+        "mode": "minor",
+        "confidence": 0.8
+      }
+    ]
+  },
+  "beatGrid": {
+    "confidence": 1.0,
+    "beats": [
+      {
+        "index": 0,
+        "timeSeconds": 0.0,
+        "beatInBar": 1,
+        "confidence": 1.0
+      },
+      {
+        "index": 1,
+        "timeSeconds": 0.428571,
+        "beatInBar": 2,
+        "confidence": 1.0
+      },
+      {
+        "index": 64,
+        "timeSeconds": 27.428571,
+        "beatInBar": 1,
+        "confidence": 1.0
+      },
+      {
+        "index": 128,
+        "timeSeconds": 54.857143,
+        "beatInBar": 1,
+        "confidence": 1.0
+      }
+    ],
+    "downbeats": [
+      {
+        "index": 0,
+        "timeSeconds": 0.0,
+        "beatInBar": 1,
+        "confidence": 1.0
+      },
+      {
+        "index": 64,
+        "timeSeconds": 27.428571,
+        "beatInBar": 1,
+        "confidence": 1.0
+      },
+      {
+        "index": 128,
+        "timeSeconds": 54.857143,
+        "beatInBar": 1,
+        "confidence": 1.0
+      }
+    ]
+  },
+  "sections": [
+    {
+      "id": "section-intro",
+      "type": "intro",
+      "startSeconds": 0.0,
+      "endSeconds": 27.428571,
+      "startBeatIndex": 0,
+      "endBeatIndex": 64,
+      "energyMean": 0.25,
+      "energyPeak": 0.35,
+      "vocalPresence": 0.0,
+      "confidence": 0.9
+    },
+    {
+      "id": "section-build",
+      "type": "build",
+      "startSeconds": 27.428571,
+      "endSeconds": 54.857143,
+      "startBeatIndex": 64,
+      "endBeatIndex": 128,
+      "energyMean": 0.65,
+      "energyPeak": 0.9,
+      "vocalPresence": 0.1,
+      "confidence": 0.85
+    },
+    {
+      "id": "section-drop",
+      "type": "drop",
+      "startSeconds": 54.857143,
+      "endSeconds": 109.714286,
+      "startBeatIndex": 128,
+      "endBeatIndex": 256,
+      "energyMean": 0.92,
+      "energyPeak": 1.0,
+      "vocalPresence": 0.0,
+      "confidence": 0.9
+    }
+  ],
+  "energy": {
+    "globalEnergy": 0.82,
+    "curve": [
+      {
+        "timeSeconds": 0.0,
+        "value": 0.25
+      },
+      {
+        "timeSeconds": 27.428571,
+        "value": 0.55
+      },
+      {
+        "timeSeconds": 54.857143,
+        "value": 0.95
+      }
+    ],
+    "bassEnergyCurve": [
+      {
+        "timeSeconds": 0.0,
+        "value": 0.2
+      },
+      {
+        "timeSeconds": 54.857143,
+        "value": 1.0
+      }
+    ],
+    "onsetDensityCurve": [
+      {
+        "timeSeconds": 0.0,
+        "value": 0.3
+      },
+      {
+        "timeSeconds": 54.857143,
+        "value": 0.85
+      }
+    ]
+  },
+  "vocals": {
+    "hasVocals": false,
+    "confidence": 0.8,
+    "regions": []
+  },
+  "cuePoints": [
+    {
+      "id": "cue-mix-in",
+      "type": "mix_in",
+      "timeSeconds": 0.0,
+      "beatIndex": 0,
+      "sectionId": "section-intro",
+      "confidence": 1.0,
+      "tags": [
+        "phrase_start"
+      ]
+    },
+    {
+      "id": "cue-build-start",
+      "type": "build_start",
+      "timeSeconds": 27.428571,
+      "beatIndex": 64,
+      "sectionId": "section-build",
+      "confidence": 0.9
+    },
+    {
+      "id": "cue-drop",
+      "type": "drop",
+      "timeSeconds": 54.857143,
+      "beatIndex": 128,
+      "sectionId": "section-drop",
+      "confidence": 0.9
+    }
+  ],
+  "quality": {
+    "overallConfidence": 0.86,
+    "warnings": [
+      "Stub analysis values are deterministic placeholders"
+    ]
+  }
+}

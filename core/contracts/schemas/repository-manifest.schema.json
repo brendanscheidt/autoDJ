@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autodj.repository-manifest.v1",
+  "title": "AutoDJ RepositoryManifest v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "repositoryId",
+    "producer",
+    "producerVersion",
+    "createdAtUtc",
+    "source",
+    "tracks"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "repositoryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "producerVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "$ref": "#/$defs/repositorySource"
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trackAsset"
+      }
+    },
+    "scan": {
+      "$ref": "#/$defs/repositoryScanResult"
+    }
+  },
+  "$defs": {
+    "timeSeconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "repositorySource": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "repositoryType",
+        "rootUri"
+      ],
+      "properties": {
+        "repositoryType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rootUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "trackAsset": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "trackId",
+        "repositoryId",
+        "sourceUri"
+      ],
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "artist": {
+          "type": "string"
+        },
+        "album": {
+          "type": "string"
+        },
+        "durationSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "sampleRate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "formatHint": {
+          "enum": [
+            "wav",
+            "mp3",
+            "flac",
+            "aiff",
+            "unknown"
+          ]
+        },
+        "providerMetadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "repositoryScanResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "repositoryId",
+        "tracksAdded",
+        "tracksUpdated",
+        "tracksRemoved",
+        "errors"
+      ],
+      "properties": {
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tracksAdded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tracksUpdated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tracksRemoved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repositoryError"
+          }
+        }
+      }
+    },
+    "repositoryError": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceUri": {
+          "type": "string"
+        },
+        "trackId": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

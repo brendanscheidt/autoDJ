@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0.0",
+  "repositoryId": "local-dubstep-stub-repo",
+  "producer": "autodj.repository.stub",
+  "producerVersion": "0.1.0",
+  "createdAtUtc": "2026-01-01T00:00:00Z",
+  "source": {
+    "repositoryType": "local",
+    "rootUri": "fixture://autodj/local-dubstep-stubs",
+    "providerMetadata": {
+      "note": "Synthetic contract fixture only"
+    }
+  },
+  "tracks": [
+    {
+      "trackId": "track-stub-a",
+      "repositoryId": "local-dubstep-stub-repo",
+      "sourceUri": "fixture://autodj/local-dubstep-stubs/track-stub-a",
+      "contentHash": "sha256:stub-track-a",
+      "title": "Stub Build Into Drop",
+      "artist": "AutoDJ Fixture",
+      "durationSeconds": 180.0,
+      "sampleRate": 44100,
+      "channels": 2,
+      "formatHint": "wav"
+    },
+    {
+      "trackId": "track-stub-b",
+      "repositoryId": "local-dubstep-stub-repo",
+      "sourceUri": "fixture://autodj/local-dubstep-stubs/track-stub-b",
+      "contentHash": "sha256:stub-track-b",
+      "title": "Stub Incoming Drop",
+      "artist": "AutoDJ Fixture",
+      "durationSeconds": 192.0,
+      "sampleRate": 44100,
+      "channels": 2,
+      "formatHint": "wav"
+    }
+  ],
+  "scan": {
+    "repositoryId": "local-dubstep-stub-repo",
+    "tracksAdded": 2,
+    "tracksUpdated": 0,
+    "tracksRemoved": 0,
+    "errors": []
+  }
+}

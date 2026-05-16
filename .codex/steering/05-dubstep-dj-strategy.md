@@ -1,0 +1,329 @@
+# Dubstep DJ Strategy
+
+## Purpose
+
+The Dubstep DJ strategy is the first genre-specific AutoDJ brain. It consumes a
+pool of analyzed dubstep tracks and emits a `MixPlan` that the playback engine
+can execute.
+
+It owns:
+
+- Track ordering.
+- Transition technique selection.
+- Cue point selection.
+- Energy arc.
+- Automation keyframes.
+- Debug reasons for decisions.
+
+It does not own:
+
+- Audio rendering.
+- File importing.
+- Stem separation implementation.
+- Generic playback controls.
+- UI behavior.
+
+## Input Assumptions
+
+For the MVP, assume every input track has already passed a genre gate and is
+dubstep or adjacent bass music.
+
+The strategy should still inspect compatibility. It should downrank or reject
+tracks with:
+
+- Low beat-grid confidence.
+- Missing or ambiguous drop sections.
+- Tempo too far outside the target range.
+- Unusable intro/outro material.
+- High vocal clash risk.
+- Analysis confidence too low for planned transition types.
+
+## Tempo Model
+
+Dubstep commonly uses halftime feel. Normalize tempo before comparing tracks.
+
+Examples:
+
+- 70 BPM can be equivalent to 140 BPM.
+- 75 BPM can be equivalent to 150 BPM.
+- 87 BPM may be equivalent to 174 BPM for adjacent bass genres, but should be
+  treated cautiously in a dubstep-only strategy.
+
+The `TempoAnalysis` should expose both raw and normalized BPM. The strategy
+should compare normalized BPM first, then verify beat-grid alignment.
+
+## Required Track Features
+
+The strategy works best when each `AnalyzedTrack` includes:
+
+- BPM and normalized BPM.
+- Beat grid and downbeats.
+- Key/Camelot estimate.
+- Sections: intro, build, drop, breakdown, outro.
+- Energy curve.
+- Bass energy curve.
+- Vocal regions.
+- Cue candidates.
+- Stem paths when available.
+
+Each feature must have confidence. The strategy should prefer simple transitions
+when confidence is low.
+
+## Transition Templates
+
+### Intro/Outro Blend
+
+Use when:
+
+- Outgoing track has a clean outro or low-energy breakdown.
+- Incoming track has a clean intro.
+- BPM and key are compatible.
+- Vocal clash risk is low.
+
+Typical automation:
+
+- Start incoming deck with volume `0.0`.
+- Keep incoming lows down initially.
+- Fade incoming volume over 16 or 32 bars.
+- Swap lows near phrase boundary.
+- Fade outgoing volume or echo out.
+
+### Build-To-Drop Swap
+
+Use when:
+
+- Incoming track has a high-confidence build ending in a drop.
+- Outgoing track can create tension leading into the same drop boundary.
+- Phrases align cleanly.
+
+Typical automation:
+
+- Bring incoming build in over outgoing breakdown/build.
+- Reduce outgoing lows.
+- Increase filter/reverb tension if useful.
+- Hard or near-hard swap at incoming drop.
+- Restore lows on incoming deck at drop.
+
+### Drop Double
+
+Use when:
+
+- Both tracks have compatible drops.
+- BPM is nearly identical or time-stretch quality is acceptable.
+- Key clash is acceptable.
+- Drops have complementary frequency/vocal content.
+
+Typical automation:
+
+- Align drops on the same downbeat.
+- Keep both audible for a short phrase.
+- Manage low end aggressively to avoid mud.
+- Choose one track as primary after the double.
+
+Risk:
+
+- This can sound bad quickly. Require high confidence and conservative duration.
+
+### Loop Tighten
+
+Use when:
+
+- Outgoing track has a loopable build, fill, vocal chop, riser, or pre-drop
+  phrase.
+- Incoming track has a strong drop target.
+- Beat grid confidence is high.
+
+Typical automation:
+
+- Set loop length to 4 or 8 beats.
+- Tighten to 2, 1, and optionally 1/2 beat.
+- Increase filter/reverb/echo or reduce lows.
+- Release or clear loop at incoming drop.
+
+Risk:
+
+- Requires precise loop points and clean transient handling.
+
+### Vocal Over Instrumental
+
+Use when:
+
+- A vocal stem or strong vocal region exists.
+- The target instrumental region has low vocal presence.
+- Key compatibility is high.
+- Stem quality is acceptable.
+
+Typical automation:
+
+- Load vocal stem on an additional deck if available.
+- Keep instrumental deck as primary.
+- Apply EQ/filter to reduce clash.
+- Exit before vocal conflict or drop if it becomes crowded.
+
+MVP note:
+
+- This should be optional until stem quality scoring exists.
+
+### Hard Cut / Impact Cut
+
+Use when:
+
+- Track sections demand a sharp switch.
+- Phrase alignment is exact.
+- Energy jump is intentional.
+- A safer blend is not musically appropriate.
+
+Typical automation:
+
+- Cut outgoing volume at downbeat.
+- Start incoming at drop/downbeat.
+- Optional echo tail on outgoing deck.
+
+## Scoring Model
+
+The strategy should score candidate transitions before selecting them.
+
+Suggested initial score:
+
+```text
+score =
+  0.25 * bpmCompatibility +
+  0.20 * phraseAlignment +
+  0.15 * keyCompatibility +
+  0.15 * sectionCompatibility +
+  0.10 * energyArcFit +
+  0.10 * vocalClashSafety +
+  0.05 * analysisConfidence
+```
+
+Weights can vary by transition template. For example, loop tightening should
+weight beat-grid confidence more heavily than key compatibility.
+
+## Compatibility Signals
+
+### BPM Compatibility
+
+High score:
+
+- Normalized BPM delta <= 1%.
+- Beat grid confidence is high.
+
+Medium score:
+
+- Delta <= 3% and time-stretch backend is available.
+
+Low score:
+
+- Delta > 5%, unless doing an intentional hard cut.
+
+### Key Compatibility
+
+Use Camelot-style compatibility when available.
+
+High score:
+
+- Same key.
+- Adjacent Camelot key.
+- Relative major/minor where musically acceptable.
+
+Low score:
+
+- Distant key with sustained melodic/vocal overlap.
+
+Key matters less for short percussion-heavy cuts and more for blends, doubles,
+and vocals.
+
+### Phrase Alignment
+
+Prefer 8, 16, and 32-bar boundaries. For dubstep, 16 and 32 bars should dominate
+early templates.
+
+High score:
+
+- Incoming drop lands exactly on a downbeat and phrase boundary.
+- Outgoing transition point also lands on a phrase boundary.
+
+Low score:
+
+- Transition starts mid-phrase without a strong reason.
+
+### Section Compatibility
+
+Good pairings:
+
+- Outgoing outro -> incoming intro.
+- Outgoing breakdown -> incoming build.
+- Outgoing build -> incoming drop.
+- Outgoing drop end -> incoming drop start for doubles or impact cuts.
+
+Risky pairings:
+
+- Vocal verse over vocal verse.
+- Drop over dense drop without EQ control.
+- Intro over high-energy drop unless intentionally layering.
+
+### Vocal Clash Safety
+
+High score:
+
+- Only one audible vocal source.
+- Vocal stem is isolated and target instrumental has low vocal presence.
+
+Low score:
+
+- Two vocals overlap in different keys or rhythms.
+
+## Plan Generation Flow
+
+1. Filter tracks by minimum analysis quality.
+2. Normalize tempo and key fields.
+3. Generate candidate cue points if missing.
+4. Build transition candidates between compatible track pairs.
+5. Score candidates by template-specific rules.
+6. Select an energy arc for the set.
+7. Choose track sequence using transition scores and energy goals.
+8. Compile selected transitions into deck commands and automation lanes.
+9. Validate resulting `MixPlan`.
+10. Emit annotations explaining selected and rejected transitions.
+
+## Energy Arc
+
+The MVP should support a simple `ramp` energy arc:
+
+- Start medium.
+- Build over the first third.
+- Peak in the final third.
+- Avoid too many max-energy tracks back-to-back.
+
+Later add:
+
+- Wave-shaped arcs.
+- User-directed "go harder" controls.
+- Adaptive track choice based on listener actions.
+
+## Failure Handling
+
+If the strategy cannot create a high-confidence transition, it should fall back
+in this order:
+
+1. Simpler phrase-aligned intro/outro blend.
+2. Echo-out into phrase-aligned start.
+3. Hard cut on downbeat.
+4. Reject the track from the generated set.
+
+Do not emit complex automation for low-confidence analysis. Bad confidence
+should result in safer DJ behavior.
+
+## Debug Output
+
+Every transition should include:
+
+- Final score.
+- Chosen technique.
+- Why it was chosen.
+- Major risk flags.
+- Cue points used.
+- Rejected alternatives when useful.
+
+This is essential for making bad transitions fixable.
+

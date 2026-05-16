@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "1.0.0",
+  "planId": "plan-stub-dubstep-001",
+  "createdAtUtc": "2026-01-01T00:00:00Z",
+  "strategy": {
+    "strategyId": "dubstep-dj",
+    "strategyVersion": "0.1.0",
+    "randomSeed": "foundation-stub"
+  },
+  "tracks": [
+    {
+      "placementId": "place-track-stub-a",
+      "trackId": "track-stub-a",
+      "deck": 1,
+      "sourceStartSeconds": 0.0,
+      "sourceEndSeconds": 96.0,
+      "timelineStartSeconds": 0.0,
+      "timelineEndSeconds": 96.0,
+      "role": "primary"
+    },
+    {
+      "placementId": "place-track-stub-b",
+      "trackId": "track-stub-b",
+      "deck": 2,
+      "sourceStartSeconds": 16.0,
+      "sourceEndSeconds": 112.0,
+      "timelineStartSeconds": 64.0,
+      "timelineEndSeconds": 160.0,
+      "role": "incoming"
+    }
+  ],
+  "transitions": [
+    {
+      "transitionId": "transition-build-to-drop-stub",
+      "fromPlacementId": "place-track-stub-a",
+      "toPlacementId": "place-track-stub-b",
+      "technique": "build_to_drop_swap",
+      "timelineStartSeconds": 64.0,
+      "timelineEndSeconds": 96.0,
+      "score": 0.82,
+      "reasons": [
+        "Stub tracks share normalized BPM",
+        "Incoming placement starts on a phrase boundary",
+        "Transition demonstrates build-to-drop command shape"
+      ],
+      "riskFlags": [
+        "placeholder_analysis"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "type": "load",
+      "at": 0.0,
+      "deck": 1,
+      "trackId": "track-stub-a",
+      "stem": "full",
+      "cueSeconds": 0.0
+    },
+    {
+      "type": "play",
+      "at": 0.0,
+      "deck": 1
+    },
+    {
+      "type": "load",
+      "at": 60.0,
+      "deck": 2,
+      "trackId": "track-stub-b",
+      "stem": "full",
+      "cueSeconds": 16.0
+    },
+    {
+      "type": "play",
+      "at": 64.0,
+      "deck": 2
+    },
+    {
+      "type": "automate",
+      "deck": 2,
+      "control": "volume",
+      "keyframes": [
+        {
+          "at": 64.0,
+          "value": 0.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 96.0,
+          "value": 1.0,
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "type": "automate",
+      "deck": 1,
+      "control": "eqLow",
+      "keyframes": [
+        {
+          "at": 88.0,
+          "value": 1.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 96.0,
+          "value": 0.0,
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "type": "setLoop",
+      "at": 88.0,
+      "deck": 1,
+      "startSeconds": 88.0,
+      "lengthBeats": 4.0
+    },
+    {
+      "type": "clearLoop",
+      "at": 96.0,
+      "deck": 1
+    },
+    {
+      "type": "stop",
+      "at": 96.0,
+      "deck": 1
+    }
+  ],
+  "annotations": [
+    {
+      "at": 64.0,
+      "transitionId": "transition-build-to-drop-stub",
+      "message": "Incoming track is staged for a phrase-aligned drop swap"
+    }
+  ]
+}

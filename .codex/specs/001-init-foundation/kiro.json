@@ -1,0 +1,42 @@
+{
+  "id": "001-init-foundation",
+  "title": "Init Foundation",
+  "specStyle": "kiro",
+  "status": "ready-for-implementation",
+  "sourceSpec": "../001-init-foundation.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/08-engineering-practices.md"
+  ],
+  "optionalSteeringContext": [
+    "../../steering/06-playback-engine.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "subagentExecutionRules": [
+    "Before executing any task, read this kiro.json, requirements.md, design.md, tasks.md, and all requiredSteeringContext files.",
+    "For playback-specific tasks, also read ../../steering/06-playback-engine.md.",
+    "For analysis-worker tasks, also read ../../steering/07-analysis-pipeline.md.",
+    "Keep edits within the task's declared ownership unless the task explicitly permits broader changes.",
+    "Do not implement out-of-scope real audio analysis, real stem separation, mobile UI, or streaming-service integrations.",
+    "After each task, update tasks.md checkboxes only for work that was completed and verified."
+  ],
+  "verificationCommands": {
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug",
+    "pythonInstall": ".\\.venv\\Scripts\\python -m pip install -e .\\analysis\\worker-python[dev]",
+    "pythonTest": ".\\.venv\\Scripts\\python -m pytest .\\analysis\\worker-python",
+    "pythonCliHelp": ".\\.venv\\Scripts\\python -m autodj_analysis --help"
+  }
+}
+

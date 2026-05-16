@@ -1,0 +1,462 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autodj.mix-plan.v1",
+  "title": "AutoDJ MixPlan v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "planId",
+    "createdAtUtc",
+    "strategy",
+    "tracks",
+    "transitions",
+    "commands"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "planId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "strategy": {
+      "$ref": "#/$defs/strategyProvenance"
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trackPlacement"
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transitionEdge"
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/deckCommand"
+      }
+    },
+    "annotations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/planAnnotation"
+      }
+    }
+  },
+  "$defs": {
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "timeSeconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "strategyProvenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "strategyId",
+        "strategyVersion"
+      ],
+      "properties": {
+        "strategyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strategyVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "randomSeed": {
+          "type": "string"
+        }
+      }
+    },
+    "trackPlacement": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "placementId",
+        "trackId",
+        "deck",
+        "sourceStartSeconds",
+        "timelineStartSeconds"
+      ],
+      "properties": {
+        "placementId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sourceStartSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "sourceEndSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "timelineStartSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "timelineEndSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "incoming",
+            "acapella",
+            "loop",
+            "stem"
+          ]
+        }
+      }
+    },
+    "transitionEdge": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "transitionId",
+        "fromPlacementId",
+        "toPlacementId",
+        "technique",
+        "timelineStartSeconds",
+        "timelineEndSeconds",
+        "score",
+        "reasons"
+      ],
+      "properties": {
+        "transitionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fromPlacementId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "toPlacementId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "technique": {
+          "enum": [
+            "intro_outro_blend",
+            "build_to_drop_swap",
+            "drop_double",
+            "loop_tighten",
+            "vocal_over_instrumental",
+            "echo_out",
+            "hard_cut"
+          ]
+        },
+        "timelineStartSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "timelineEndSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "score": {
+          "$ref": "#/$defs/confidence"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "riskFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "deckCommand": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/loadCommand"
+        },
+        {
+          "$ref": "#/$defs/playCommand"
+        },
+        {
+          "$ref": "#/$defs/stopCommand"
+        },
+        {
+          "$ref": "#/$defs/seekCommand"
+        },
+        {
+          "$ref": "#/$defs/loopCommand"
+        },
+        {
+          "$ref": "#/$defs/clearLoopCommand"
+        },
+        {
+          "$ref": "#/$defs/automationCommand"
+        }
+      ]
+    },
+    "loadCommand": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "at",
+        "deck",
+        "trackId",
+        "cueSeconds"
+      ],
+      "properties": {
+        "type": {
+          "const": "load"
+        },
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stem": {
+          "enum": [
+            "full",
+            "vocals",
+            "drums",
+            "bass",
+            "other",
+            "instrumental"
+          ]
+        },
+        "cueSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        }
+      }
+    },
+    "playCommand": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "at",
+        "deck"
+      ],
+      "properties": {
+        "type": {
+          "const": "play"
+        },
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "stopCommand": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "at",
+        "deck"
+      ],
+      "properties": {
+        "type": {
+          "const": "stop"
+        },
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "seekCommand": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "at",
+        "deck",
+        "toSeconds"
+      ],
+      "properties": {
+        "type": {
+          "const": "seek"
+        },
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "toSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        }
+      }
+    },
+    "loopCommand": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "at",
+        "deck",
+        "startSeconds",
+        "lengthBeats"
+      ],
+      "properties": {
+        "type": {
+          "const": "setLoop"
+        },
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "lengthBeats": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "clearLoopCommand": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "at",
+        "deck"
+      ],
+      "properties": {
+        "type": {
+          "const": "clearLoop"
+        },
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "automationCommand": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type",
+        "control",
+        "keyframes"
+      ],
+      "properties": {
+        "type": {
+          "const": "automate"
+        },
+        "deck": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "control": {
+          "enum": [
+            "volume",
+            "eqLow",
+            "eqMid",
+            "eqHigh",
+            "filter",
+            "reverbWet",
+            "echoWet",
+            "tempo",
+            "crossfader"
+          ]
+        },
+        "keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/keyframe"
+          }
+        }
+      }
+    },
+    "keyframe": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "at",
+        "value"
+      ],
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "value": {
+          "type": "number"
+        },
+        "interpolation": {
+          "enum": [
+            "hold",
+            "linear",
+            "smoothstep",
+            "exponential"
+          ]
+        }
+      }
+    },
+    "planAnnotation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "at",
+        "message"
+      ],
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "placementId": {
+          "type": "string"
+        },
+        "transitionId": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
