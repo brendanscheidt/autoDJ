@@ -10,9 +10,23 @@ that plan through a dumb deck-and-mixer playback engine.
 
 ## Current Status
 
-The project is in foundation setup. The initial implementation spec is building
-the repository skeleton, C++ module boundaries, JSON contract surfaces, Python
-analysis worker stub, and a minimal desktop app target.
+The foundation setup is complete. The project now has the repository skeleton,
+C++ module boundaries, JSON contract surfaces, Python analysis worker package,
+and a minimal desktop app target.
+
+Spec 002 local repository and metadata-cache work is complete: the C++
+repository module can discover local WAV/MP3 files, assign stable track IDs,
+compute content hashes, write/read `repository-manifest.json`, and resolve the
+`.autodj-cache/` layout.
+
+Spec 003 analysis MVP work is in progress. The Python worker can read a
+repository manifest, probe each local source file with `ffprobe`, and write
+per-track `.autodj-cache/tracks/<track-id>/analyzed-track.json` artifacts while
+skipping artifacts that are already current. This phase only records basic
+container and stream metadata such as duration, sample rate, channel count,
+codec, format, bit rate, and tags. BPM, key, beat grids, sections, waveform
+generation, cue points, and stem separation are not real yet and are represented
+as low-confidence placeholders.
 
 ## Platform Direction
 
@@ -22,8 +36,9 @@ analysis worker stub, and a minimal desktop app target.
 - Analysis direction: Python offline worker.
 - Future mobile direction: reuse the C++ playback core from a mobile shell.
 
-Mobile UI, streaming-service integrations, real audio analysis, and real stem
-separation are out of scope for the initial foundation spec.
+Mobile UI, streaming-service integrations, musical analysis, waveform
+generation, and real stem separation are still out of scope for the current
+slice.
 
 ## Architecture Summary
 
@@ -45,7 +60,7 @@ repository, genre, analysis, or DJ strategy decisions.
 
 ## C++ Build Commands
 
-The expected C++ foundation commands are:
+The expected C++ verification commands are:
 
 ```powershell
 cmake --preset debug
@@ -53,12 +68,12 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-At this stage the root CMake project is intentionally minimal. Later tasks in
-the init spec add module targets and tests.
+JUCE is fetched by CMake for the desktop app target; no manual JUCE checkout is
+required for the current build.
 
 ## Python Worker Commands
 
-Once the Python analysis worker package is created by the init spec, use:
+Set up and test the Python analysis worker with:
 
 ```powershell
 python -m venv .venv
@@ -66,10 +81,39 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e .\analysis\worker-python[dev]
 .\.venv\Scripts\python -m pytest .\analysis\worker-python
 .\.venv\Scripts\python -m autodj_analysis --help
+.\.venv\Scripts\python -m autodj_analysis analyze-batch --help
 ```
 
-The first worker implementation is a stub. Heavy dependencies such as Essentia,
-librosa, Demucs, and FFmpeg integration are planned for later specs.
+Single-file stub commands remain available:
+
+```powershell
+.\.venv\Scripts\python -m autodj_analysis classify <audio-path>
+.\.venv\Scripts\python -m autodj_analysis analyze <audio-path> --out <output-dir>
+```
+
+Batch analysis consumes a repository manifest produced by the local repository
+flow and writes analyzed artifacts into the metadata cache:
+
+```powershell
+.\.venv\Scripts\python -m autodj_analysis analyze-batch `
+  <repository-manifest.json> `
+  --out <cache-root>
+```
+
+Useful batch options:
+
+```powershell
+.\.venv\Scripts\python -m autodj_analysis analyze-batch `
+  <repository-manifest.json> `
+  --out <cache-root> `
+  --ffprobe ffprobe `
+  --parameters-hash sha256:ffprobe-v1-placeholders-v1 `
+  --json
+```
+
+Install FFmpeg tools so `ffprobe` is available on `PATH` before running real
+batch analysis. Heavy musical-analysis dependencies such as Essentia, librosa,
+and Demucs are not part of this phase.
 
 ## Steering And Specs
 
@@ -81,22 +125,27 @@ Read the steering docs before changing architecture or contracts:
 - [.codex/steering/02-core-contracts.md](.codex/steering/02-core-contracts.md)
 - [.codex/steering/03-tech-stack.md](.codex/steering/03-tech-stack.md)
 - [.codex/steering/04-project-structure.md](.codex/steering/04-project-structure.md)
+- [.codex/steering/07-analysis-pipeline.md](.codex/steering/07-analysis-pipeline.md)
 - [.codex/steering/08-engineering-practices.md](.codex/steering/08-engineering-practices.md)
 
 Current executable spec package:
 
-- [.codex/specs/001-init-foundation/kiro.json](.codex/specs/001-init-foundation/kiro.json)
-- [.codex/specs/001-init-foundation/requirements.md](.codex/specs/001-init-foundation/requirements.md)
-- [.codex/specs/001-init-foundation/design.md](.codex/specs/001-init-foundation/design.md)
+- [.codex/specs/003-analysis-mvp/kiro.json](.codex/specs/003-analysis-mvp/kiro.json)
+- [.codex/specs/003-analysis-mvp/requirements.md](.codex/specs/003-analysis-mvp/requirements.md)
+- [.codex/specs/003-analysis-mvp/design.md](.codex/specs/003-analysis-mvp/design.md)
+- [.codex/specs/003-analysis-mvp/tasks.md](.codex/specs/003-analysis-mvp/tasks.md)
+
+Completed spec packages:
+
 - [.codex/specs/001-init-foundation/tasks.md](.codex/specs/001-init-foundation/tasks.md)
+- [.codex/specs/002-local-repository-metadata-cache/tasks.md](.codex/specs/002-local-repository-metadata-cache/tasks.md)
 
 ## Development Rules
 
-- Do not commit local music files, generated stems, generated waveform caches,
-  or `.autodj-cache/`.
+- Do not commit local music files, generated cache artifacts, generated stems,
+  generated waveform caches, or `.autodj-cache/`.
 - Keep real-time playback separate from offline analysis.
 - Keep provider-specific repository details out of playback and DJ strategy
   code.
 - Treat JSON schemas and fixtures as the contract surface between C++ and
   Python modules.
-
