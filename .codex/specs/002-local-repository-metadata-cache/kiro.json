@@ -1,0 +1,38 @@
+{
+  "id": "002-local-repository-metadata-cache",
+  "title": "Local Repository And Metadata Cache",
+  "specStyle": "kiro",
+  "status": "ready-for-implementation",
+  "sourceSpec": "../002-local-repository-metadata-cache.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "optionalSteeringContext": [
+    "../../steering/07-analysis-pipeline.md"
+  ],
+  "subagentExecutionRules": [
+    "Before executing any task, read this kiro.json, requirements.md, design.md, tasks.md, and all requiredSteeringContext files.",
+    "Keep edits within the task's declared ownership unless the task explicitly permits broader changes.",
+    "Do not implement out-of-scope real audio decoding, real audio analysis, stem separation, playback changes, mobile UI, or streaming-service integrations.",
+    "Use generated temporary files for tests; do not add real music files.",
+    "After each task, update tasks.md checkboxes only for work that was completed and verified."
+  ],
+  "verificationCommands": {
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug",
+    "pythonTest": ".\\.venv\\Scripts\\python -m pytest .\\analysis\\worker-python",
+    "pythonCliHelp": ".\\.venv\\Scripts\\python -m autodj_analysis --help"
+  }
+}

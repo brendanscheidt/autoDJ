@@ -14,13 +14,14 @@ public:
 
     [[nodiscard]] std::string repositoryId() const override;
     [[nodiscard]] const std::filesystem::path& rootPath() const noexcept;
-    [[nodiscard]] std::vector<RepositoryTrack> listTracks() const override;
+    [[nodiscard]] std::vector<TrackAsset> listTracks() const override;
     RepositoryScanResult scan() override;
+    RepositoryScanResult scan(const RepositoryManifest& previousManifest);
 
 private:
     std::filesystem::path rootPath_;
     std::string repositoryId_;
+    std::vector<TrackAsset> tracks_;
 };
 
 }  // namespace autodj::repository
-
