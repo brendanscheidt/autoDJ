@@ -1,0 +1,38 @@
+{
+  "id": "003-analysis-mvp",
+  "title": "Analysis MVP",
+  "specStyle": "kiro",
+  "status": "ready-for-implementation",
+  "sourceSpec": "../003-analysis-mvp.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "subagentExecutionRules": [
+    "Before executing any task, read this kiro.json, requirements.md, design.md, tasks.md, and all requiredSteeringContext files.",
+    "Keep edits within the task's declared ownership unless the task explicitly permits broader changes.",
+    "Use generated temporary files and test doubles for audio/probe tests; do not add real music files.",
+    "Do not implement BPM, key, section, stem, waveform, DJ strategy, playback, SQLite, mobile UI, or streaming-service functionality in this spec.",
+    "Keep ffprobe behind a subprocess adapter and make failures explicit and actionable.",
+    "After each task, update tasks.md checkboxes only for work that was completed and verified."
+  ],
+  "verificationCommands": {
+    "pythonTest": ".\\.venv\\Scripts\\python -m pytest .\\analysis\\worker-python",
+    "pythonCliHelp": ".\\.venv\\Scripts\\python -m autodj_analysis --help",
+    "pythonAnalyzeBatchHelp": ".\\.venv\\Scripts\\python -m autodj_analysis analyze-batch --help",
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug"
+  }
+}
