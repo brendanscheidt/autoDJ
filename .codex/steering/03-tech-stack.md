@@ -10,8 +10,12 @@ Desktop app / workbench:      C++20 + JUCE
 Build system:                 CMake + CMakePresets + CTest
 Playback engine:              C++20, JUCE audio primitives, swappable DSP backends
 Time-stretch/pitch-shift:     Abstract interface; evaluate Superpowered/Rubber Band later
-Analysis worker:              Python 3.10/3.11
-Analysis libraries:           Essentia, librosa, optional madmom
+Analysis POC worker:          Python 3.10/3.11
+Analysis POC libraries:       Essentia, librosa, madmom/BeatNet, aubio,
+                               MSAF, Vamp/QM plugins, audioFlux, torchaudio,
+                               pyAudioAnalysis, mir_eval, Basic Pitch as useful
+Production mobile analysis:   Native/mobile-portable C++ or licensed native
+                               libraries derived from the winning POC behavior
 Stem separation:              Demucs for MVP experiments
 Audio decoding for analysis:  FFmpeg CLI/tools first, library integration later
 Metadata cache:               JSON artifacts first, SQLite later
@@ -101,16 +105,28 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-## Python Analysis Worker
+## Python Analysis Worker / POC Analyzer
 
-Use Python for analysis and stem separation in the MVP.
+Use Python heavily for the proof-of-concept analysis engine and stem separation
+experiments.
 
 Reasons:
 
 - Best ecosystem for music information retrieval experiments.
 - Faster iteration on heuristics and ML models.
 - Easier integration with Demucs, librosa, and research libraries.
-- Analysis is offline, so real-time constraints do not require C++ yet.
+- Analysis is offline for the desktop POC, so real-time constraints do not
+  require C++ yet.
+
+Important product constraint:
+
+- Python is not assumed to be the final mobile analysis runtime.
+- A full offline mobile app must eventually analyze local phone audio on device.
+- Treat the Python worker as a POC/reference analyzer that discovers the best
+  algorithms and feature combinations, produces golden artifacts, and informs a
+  later native/mobile-portable analyzer.
+- An all-in-one Windows desktop app may bundle or launch a Python worker during
+  the POC/productization phase, but mobile should not depend on WSL or CPython.
 
 Prefer a CLI/process boundary first:
 
@@ -124,9 +140,19 @@ The C++ app can invoke the worker or consume artifacts generated externally.
 Use Python 3.10 or 3.11 initially. Some MIR libraries lag newest Python
 versions, so do not jump to 3.12+ until dependency compatibility is verified.
 
+For each analysis feature that proves valuable, record:
+
+- library/backend used,
+- relevant parameters,
+- output confidence behavior,
+- generated-fixture expectations,
+- known failure modes,
+- licensing/platform constraints,
+- portability estimate for a future C++ implementation.
+
 ## Essentia
 
-Use Essentia as the main structured music analysis library.
+Use Essentia as a primary POC/reference analysis library.
 
 Useful capabilities:
 
@@ -147,10 +173,11 @@ Sources:
 
 - Music extractor descriptors: https://essentia.upf.edu/streaming_extractor_music.html
 - Algorithms overview: https://essentia.upf.edu/documentation/algorithms_overview.html
+- Licensing: https://essentia.upf.edu/licensing_information.html
 
 ## librosa
 
-Use librosa for prototyping and secondary analysis.
+Use librosa heavily for prototyping and secondary analysis.
 
 Useful capabilities:
 
@@ -169,6 +196,39 @@ MVP use:
 Source:
 
 - Beat and tempo docs: https://librosa.org/doc/latest/beat.html
+
+## Additional POC Analysis Libraries
+
+Evaluate additional libraries when they may improve analysis quality. Do not
+limit the POC to one library if a combination produces better artifacts.
+
+Candidates:
+
+- madmom: beat, downbeat, tempo, and MIR models; BSD-licensed source unless
+  otherwise indicated, but older ecosystem and model/dependency compatibility
+  must be checked.
+- BeatNet: AI-based real-time/offline beat, downbeat, tempo, and meter tracking;
+  useful for comparing beat/downbeat quality.
+- aubio or maintained aubio forks: onset, tempo, beat, pitch, MFCC, and command
+  line tools; GPL licensing can affect redistribution decisions.
+- MSAF: music structural segmentation experiments; useful for section boundary
+  POC work.
+- Vamp/QM plugins: tempo/beat, bar/beat, key, tonal change, and segmentation
+  plugins; useful as a reference and potential native/plugin path.
+- audioFlux: MIT-licensed audio/music feature extraction library with C/Python
+  implementation and broad transform/feature support.
+- pyAudioAnalysis: Apache-licensed feature extraction, classification, and
+  segmentation library; useful as a comparison baseline.
+- torchaudio: PyTorch audio/signal processing and feature extraction; useful if
+  ML-based models become part of the POC.
+- Basic Pitch: Apache-licensed audio-to-MIDI/pitch transcription from Spotify;
+  not a core BPM solution, but useful for melody/pitch experiments.
+- mir_eval: evaluation metrics for beat, tempo, key, and other MIR tasks; use it
+  to compare candidate outputs against generated fixtures and curated references.
+
+Every candidate must be checked for installability, license, runtime/platform,
+artifact quality, and future mobile/native implications before it becomes a
+production dependency.
 
 ## madmom
 
@@ -303,7 +363,8 @@ Sources:
 
 ## Mobile Future
 
-The mobile path should reuse the C++ engine.
+The mobile path should reuse the C++ engine and eventually include an offline
+native/mobile-portable analysis path.
 
 Possible UI shells:
 
@@ -321,6 +382,9 @@ Mobile audio considerations:
   needs careful audio session and buffer management.
 - On-device ML for stems/analysis may need ExecuTorch or another mobile
   inference runtime later, but the MVP should remain offline desktop.
+- If Python POC algorithms prove product-critical, later specs must either port
+  their behavior to C++/mobile-safe libraries or make an explicit licensing and
+  packaging decision for native third-party libraries.
 
 Sources:
 
@@ -342,6 +406,9 @@ Likely for MVP:
 
 - Essentia.
 - librosa.
+- madmom/BeatNet or another beat/downbeat comparison backend.
+- MSAF or another section-analysis comparison backend.
+- mir_eval for analysis quality evaluation.
 - FFmpeg tools.
 - Demucs optional stem separation.
 

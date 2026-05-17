@@ -7,9 +7,12 @@ from autodj_analysis import (
     ArtifactIdentity,
     CacheError,
     analyzed_track_path,
+    check_analysis_artifact_freshness,
     check_artifact_freshness,
     load_analyzed_artifact,
+    load_waveform_artifact,
     track_cache_dir,
+    waveform_path,
     write_json_atomic,
 )
 
@@ -56,6 +59,7 @@ def test_analyzed_track_path_resolves_without_creating_directories(tmp_path: Pat
     artifact_path = analyzed_track_path(tmp_path, "track-drop-001")
 
     assert artifact_path == tmp_path / "tracks" / "track-drop-001" / "analyzed-track.json"
+    assert waveform_path(tmp_path, "track-drop-001") == tmp_path / "tracks" / "track-drop-001" / "waveform.json"
     assert track_cache_dir(tmp_path, "track-drop-001") == tmp_path / "tracks" / "track-drop-001"
     assert not (tmp_path / "tracks").exists()
 
@@ -196,3 +200,63 @@ def test_check_artifact_freshness_requires_source_and_parameter_hashes(tmp_path:
 
     assert source_decision.reason == "source_content_hash_unavailable"
     assert parameter_decision.reason == "parameters_hash_unavailable"
+
+
+def test_check_analysis_artifact_freshness_accepts_current_analyzed_and_waveform_artifacts(
+    tmp_path: Path,
+) -> None:
+    decision = check_analysis_artifact_freshness(
+        _loaded(tmp_path),
+        _loaded_waveform(tmp_path),
+        _identity(),
+    )
+
+    assert decision.is_fresh is True
+    assert decision.should_analyze is False
+    assert decision.reason == "fresh"
+
+
+def test_check_analysis_artifact_freshness_requires_waveform_artifact(tmp_path: Path) -> None:
+    decision = check_analysis_artifact_freshness(
+        _loaded(tmp_path),
+        load_waveform_artifact(tmp_path / "waveform.json"),
+        _identity(),
+    )
+
+    assert decision.is_fresh is False
+    assert decision.should_analyze is True
+    assert decision.reason == "waveform_artifact_missing"
+    assert "Waveform artifact" in decision.message
+
+
+def test_check_analysis_artifact_freshness_detects_stale_waveform_artifact(
+    tmp_path: Path,
+) -> None:
+    decision = check_analysis_artifact_freshness(
+        _loaded(tmp_path),
+        _loaded_waveform(tmp_path, _artifact(**{"analyzer.parametersHash": "sha256:old"})),
+        _identity(),
+    )
+
+    assert decision.is_fresh is False
+    assert decision.reason == "waveform_parameters_hash_mismatch"
+
+
+def test_check_analysis_artifact_freshness_force_rewrites_even_when_both_artifacts_are_current(
+    tmp_path: Path,
+) -> None:
+    decision = check_analysis_artifact_freshness(
+        _loaded(tmp_path),
+        _loaded_waveform(tmp_path),
+        _identity(),
+        force=True,
+    )
+
+    assert decision.is_fresh is False
+    assert decision.reason == "force"
+
+
+def _loaded_waveform(tmp_path: Path, artifact: dict | None = None):
+    artifact_path = tmp_path / "waveform.json"
+    artifact_path.write_text(json.dumps(artifact or _artifact()), encoding="utf-8")
+    return load_waveform_artifact(artifact_path)

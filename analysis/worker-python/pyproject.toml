@@ -13,6 +13,26 @@ dependencies = []
 dev = [
     "pytest>=8.0"
 ]
+analysis = [
+    "numpy>=1.26,<2.0",
+    "scipy>=1.11,<2.0",
+    "librosa>=0.10,<0.12",
+    "soundfile>=0.12,<0.14",
+    "audioread>=3.0,<4.0"
+]
+analysis-wsl = [
+    "numpy>=1.26,<2.0",
+    "scipy>=1.11,<2.0",
+    "librosa>=0.10,<0.12",
+    "soundfile>=0.12,<0.14",
+    "audioread>=3.0,<4.0",
+    "essentia>=2.1b6.dev1389,<2.2"
+]
+analysis-candidates = [
+    "audioflux>=0.1.9,<0.2",
+    "mir_eval>=0.8,<0.9",
+    "pyAudioAnalysis>=0.3.14,<0.4"
+]
 
 [project.scripts]
 autodj-analysis = "autodj_analysis.cli:main"
@@ -23,3 +43,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "analysis: optional core analysis dependency smoke tests",
+    "analysis_wsl: WSL/Linux analysis dependency smoke tests",
+    "analysis_candidate: optional exploratory MIR backend smoke tests"
+]

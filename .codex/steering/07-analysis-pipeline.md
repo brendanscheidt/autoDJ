@@ -6,6 +6,12 @@ The analysis pipeline turns local audio files into `AnalyzedTrack` artifacts tha
 DJ strategies can use. It runs offline and can be slow. Playback should never
 depend on live analysis.
 
+During the POC, the Python analysis worker may rely heavily on best-in-class MIR
+libraries to find the strongest analysis approach. Long term, the mobile product
+must be able to analyze local phone audio offline, so successful POC algorithms
+need portability notes, fixture expectations, and a path toward native C++ or
+mobile-safe library implementation.
+
 ## MVP Pipeline
 
 ```text
@@ -69,7 +75,9 @@ Recommended sources:
 
 - Essentia baseline.
 - librosa experiments.
-- Optional madmom downbeat model.
+- madmom, BeatNet, aubio, Vamp/QM plugins, and other candidate beat/downbeat
+  backends as comparison sources.
+- mir_eval metrics for generated fixtures and curated references.
 
 The beat grid is one of the most important artifacts. Loop tightening, phrase
 alignment, and drop swaps should require high confidence.
@@ -98,6 +106,8 @@ MVP approach:
 
 - Use energy curve changes, onset density, low-frequency energy, and phrase
   boundaries.
+- Compare MSAF, Essentia descriptors, librosa recurrence/segmentation helpers,
+  and Vamp/QM segmenter outputs where practical during the POC.
 - Find high-energy plateaus as drop candidates.
 - Find rising energy before drops as build candidates.
 - Find low-energy openings/closings as intro/outro candidates.
@@ -231,8 +241,28 @@ Store:
 - Parameters.
 - Source hash.
 - Random seed if any.
+- Backend/library identity for each major feature family.
+- Portability notes for algorithms expected to move into a native analyzer.
 
 If a model is nondeterministic, document that in the artifact provenance.
+
+## POC To Native Port Path
+
+For each feature family, the Python POC should produce enough evidence for a
+future C++/mobile implementation:
+
+- decoded signal assumptions,
+- frame size and hop size,
+- filters/transforms used,
+- library function or model used,
+- confidence calculation,
+- generated fixture expected output,
+- known false positives/false negatives,
+- whether the behavior is easy, moderate, hard, or impractical to port.
+
+Do not copy incompatible open-source code into a closed-source native analyzer.
+Use licenses correctly, buy commercial licenses where appropriate, or re-create
+behavior from documented algorithms and independently written implementation.
 
 ## Debuggability
 
@@ -249,4 +279,3 @@ The UI should be able to show:
 
 If a generated transition sounds bad, the first debugging question should be:
 "Was the analysis wrong, or was the DJ decision wrong?"
-

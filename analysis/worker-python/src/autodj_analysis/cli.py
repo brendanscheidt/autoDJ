@@ -10,10 +10,13 @@ from typing import Sequence
 
 from . import __version__
 from .analyze import analyze_stub
-from .batch import DEFAULT_PARAMETERS_HASH, BatchAnalysisResult, analyze_repository_manifest
+from .batch import DEFAULT_PARAMETERS_HASH, BatchAnalysisResult, SignalAnalyzer, analyze_repository_manifest
+from .debug_waveform import build_debug_waveform_artifact, write_debug_waveform_artifact
 from .genre import classify_stub
+from .audio_io import load_audio
 from .manifest import ManifestError
 from .probe import ProbeRunner
+from .rekordbox_xml import apply_rekordbox_xml_file
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,6 +82,73 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the batch summary as JSON",
     )
 
+    debug_waveform = subparsers.add_parser(
+        "debug-waveform",
+        help="write a high-resolution RGB waveform JSON artifact for visual debugging",
+    )
+    debug_waveform.add_argument("audio_path", type=Path, help="local WAV/MP3 path to inspect")
+    debug_waveform.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="JSON file path where the debug waveform artifact will be written",
+    )
+    debug_waveform.add_argument(
+        "--points",
+        type=int,
+        default=32_768,
+        help="target number of waveform points to write",
+    )
+    debug_waveform.add_argument(
+        "--sample-rate",
+        type=int,
+        default=22_050,
+        help="analysis sample rate used for the debug waveform",
+    )
+    debug_waveform.add_argument(
+        "--low-cutoff-hz",
+        type=float,
+        default=180.0,
+        help="low/mid band crossover frequency in Hz",
+    )
+    debug_waveform.add_argument(
+        "--high-cutoff-hz",
+        type=float,
+        default=2_000.0,
+        help="mid/high band crossover frequency in Hz",
+    )
+    debug_waveform.add_argument(
+        "--track-id",
+        help="optional track id to store in the debug artifact; defaults to the audio filename stem",
+    )
+    debug_waveform.add_argument(
+        "--json",
+        action="store_true",
+        help="print the debug waveform summary as JSON",
+    )
+
+    apply_rekordbox = subparsers.add_parser(
+        "apply-rekordbox-xml",
+        help="apply Rekordbox XML tempo/grid/cue overrides to an analyzed-track artifact",
+    )
+    apply_rekordbox.add_argument("analyzed_track", type=Path, help="input analyzed-track.json path")
+    apply_rekordbox.add_argument("rekordbox_xml", type=Path, help="Rekordbox XML export path")
+    apply_rekordbox.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="output analyzed-track JSON path with Rekordbox overrides",
+    )
+    apply_rekordbox.add_argument(
+        "--track-name",
+        help="optional Rekordbox TRACK Name to import when the XML has multiple tracks",
+    )
+    apply_rekordbox.add_argument(
+        "--json",
+        action="store_true",
+        help="print the override summary as JSON",
+    )
+
     return parser
 
 
@@ -127,7 +197,12 @@ def _manifest_error_payload(error: ManifestError, manifest_path: Path, cache_roo
     }
 
 
-def main(argv: Sequence[str] | None = None, *, probe_runner: ProbeRunner | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    probe_runner: ProbeRunner | None = None,
+    signal_analyzer: SignalAnalyzer | None = None,
+) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -156,6 +231,7 @@ def main(argv: Sequence[str] | None = None, *, probe_runner: ProbeRunner | None 
                     force=args.force,
                     parameters_hash=args.parameters_hash,
                     probe_runner=probe_runner,
+                    signal_analyzer=signal_analyzer,
                 )
             except ManifestError as exc:
                 if args.json:
@@ -169,6 +245,53 @@ def main(argv: Sequence[str] | None = None, *, probe_runner: ProbeRunner | None 
             else:
                 _print_batch_human(result)
             return 0 if result.ok else 1
+
+        if args.command == "debug-waveform":
+            decoded_audio = load_audio(args.audio_path, target_sample_rate=args.sample_rate)
+            artifact = build_debug_waveform_artifact(
+                args.track_id or args.audio_path.stem,
+                decoded_audio,
+                analyzer_version=__version__,
+                target_point_count=args.points,
+                low_cutoff_hz=args.low_cutoff_hz,
+                high_cutoff_hz=args.high_cutoff_hz,
+            )
+            output_path = write_debug_waveform_artifact(args.out, artifact)
+            payload = {
+                "ok": True,
+                "artifact": "debug-waveform",
+                "outputPath": str(output_path),
+                "points": len(artifact["points"]),
+                "durationSeconds": artifact["durationSeconds"],
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                print(
+                    "Debug waveform written: "
+                    f"{output_path} ({payload['points']} points, "
+                    f"{payload['durationSeconds']} seconds)"
+                )
+            return 0
+
+        if args.command == "apply-rekordbox-xml":
+            output_path = apply_rekordbox_xml_file(
+                args.analyzed_track,
+                args.rekordbox_xml,
+                args.out,
+                track_name=args.track_name,
+            )
+            payload = {
+                "ok": True,
+                "artifact": "analyzed-track",
+                "outputPath": str(output_path),
+                "source": "rekordbox.xml",
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Rekordbox overrides written: {output_path}")
+            return 0
     except OSError as exc:
         print(f"autodj-analysis: {exc}", file=sys.stderr)
         return 1

@@ -1,0 +1,47 @@
+{
+  "id": "004-real-audio-analysis-baseline",
+  "title": "Real Audio Analysis Baseline",
+  "specStyle": "kiro",
+  "status": "ready-for-implementation",
+  "sourceSpec": "../004-real-audio-analysis-baseline.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/05-dubstep-dj-strategy.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "subagentExecutionRules": [
+    "Before executing any task, read this kiro.json, requirements.md, design.md, tasks.md, and all requiredSteeringContext files.",
+    "Keep edits within the task's declared ownership unless the task explicitly permits broader changes.",
+    "Do not add desktop UI, playback scheduling, DJ strategy generation, mobile UI, SQLite, stem separation, or streaming-service functionality in this spec.",
+    "Use generated synthetic audio fixtures and test doubles; do not add real music files.",
+    "Keep WSL/Linux analysis dependency assumptions out of native C++ app, playback, DJ, and repository modules.",
+    "Treat Python/WSL as a POC/reference analyzer, not the final offline mobile runtime.",
+    "Use strong Python/MIR libraries aggressively for the POC when they improve analysis quality.",
+    "Record library/backend parameters, quality results, licenses, platform constraints, and future native-portability notes for each selected feature family.",
+    "Keep analysis dependencies behind explicit optional extras, smoke tests, and structured errors.",
+    "Keep confidence values honest; weak analysis must produce warnings and safe fallbacks, not fake high-confidence outputs.",
+    "After each task, update tasks.md checkboxes only for work that was completed and verified."
+  ],
+  "verificationCommands": {
+    "windowsPythonTest": ".\\.venv\\Scripts\\python -m pytest .\\analysis\\worker-python",
+    "windowsPythonCliHelp": ".\\.venv\\Scripts\\python -m autodj_analysis --help",
+    "windowsPythonAnalyzeBatchHelp": ".\\.venv\\Scripts\\python -m autodj_analysis analyze-batch --help",
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug",
+    "wslStatus": "wsl --status",
+    "wslPythonVersion": "wsl -d Ubuntu-24.04 -- bash -lc \"cd /mnt/c/Users/Brendan/Dev/AudioProj && python3.11 --version\"",
+    "wslAnalysisTest": "wsl -d Ubuntu-24.04 -- bash -lc \"cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && python -m pytest analysis/worker-python\""
+  }
+}

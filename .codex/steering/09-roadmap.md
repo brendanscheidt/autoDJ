@@ -71,19 +71,46 @@ Target: 1 to 2 weeks.
 Deliverables:
 
 - FFmpeg probe/decode integration.
+- Python POC/reference analyzer using strong MIR libraries aggressively.
 - Essentia baseline descriptors.
 - librosa supplemental energy/onset helpers.
+- Beat/downbeat comparison against madmom, BeatNet, aubio, Vamp/QM plugins, or
+  other viable libraries.
+- Structure/cue experiments with MSAF, Essentia/librosa features, and custom
+  heuristics.
+- Evaluation harness using generated fixtures and mir_eval where useful.
 - BPM/key/beat grid fields in `AnalyzedTrack`.
 - Basic waveform overview.
 - Stub or heuristic section detection.
 - Cue candidate generation.
 - Confidence values.
+- Portability notes for later native/mobile analysis implementation.
 
 Success:
 
 - Analyze a small local dubstep folder.
 - Inspect generated metadata in UI or CLI.
 - Beat grid and rough drop/build candidates are visible.
+- Candidate libraries are compared honestly, and the winning POC behavior is
+  captured well enough to port or license later.
+
+## Phase 3.5: Native Analysis Feasibility
+
+Target: after the Python POC produces useful metadata.
+
+Deliverables:
+
+- Identify which POC analysis outputs must run offline on mobile.
+- Decide whether to port algorithms to homegrown C++, license native libraries,
+  or use mobile-safe ML runtimes.
+- Build a small native prototype for waveform, energy, onset, and at least one
+  tempo/beat-grid path.
+- Compare native output against Python POC golden fixtures.
+
+Success:
+
+- There is a credible path to on-device mobile analysis without WSL, CPython, or
+  server-side preprocessing.
 
 ## Phase 4: Playback Engine Skeleton
 
@@ -184,12 +211,14 @@ Deliverables:
 - C++ playback core isolated from desktop UI.
 - Small iOS or Android shell prototype.
 - Mobile audio backend evaluation.
+- Mobile analysis runtime evaluation based on Phase 3.5 findings.
 - Time-stretch backend decision.
 - Analysis/stem strategy for mobile constraints.
 
 Success:
 
-- A precomputed `MixPlan` can play on a mobile device using local audio assets.
+- A precomputed `MixPlan` can play on a mobile device using local audio assets,
+  and the remaining path to local on-device analysis is technically understood.
 
 ## Biggest Risks
 
@@ -199,4 +228,3 @@ Success:
 - Android latency and device variance can complicate mobile later.
 - Licensing decisions for JUCE, FFmpeg builds, stem models, and DSP backends must
   be resolved before shipping commercially.
-

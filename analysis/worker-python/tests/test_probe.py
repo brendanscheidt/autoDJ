@@ -44,6 +44,7 @@ def _ffprobe_payload() -> dict:
                 "codec_long_name": "MP3 (MPEG audio layer 3)",
                 "sample_rate": "48000",
                 "channels": 2,
+                "start_time": "0.025057",
                 "duration": "12.500000",
                 "bit_rate": "192000",
                 "disposition": {"default": 1},
@@ -90,6 +91,7 @@ def test_probe_audio_runs_ffprobe_command_and_parses_primary_stream(tmp_path: Pa
         ]
     ]
     assert probe.duration_seconds == 12.5
+    assert probe.start_time_seconds == pytest.approx(0.025057)
     assert probe.sample_rate == 48000
     assert probe.channels == 2
     assert probe.codec_name == "mp3"

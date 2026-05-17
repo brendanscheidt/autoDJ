@@ -1,17 +1,27 @@
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 
+import pytest
+
+from audio_fixtures import create_energy_ramp_fixture
 from autodj_analysis import (
     ANALYZER_PRODUCER,
     ANALYZER_VERSION,
     DEFAULT_PARAMETERS_HASH,
+    AudioLoadError,
     AudioProbe,
+    EnergyFeatures,
     RepositoryTrack,
+    SignalAnalysisResult,
+    StructureFeatures,
+    TempoFeatures,
     analyzed_track_path,
     analyze_repository_manifest,
     artifact_identity_for_track,
     build_analyzed_track_artifact,
+    waveform_path,
 )
 
 
@@ -38,6 +48,7 @@ def _track(**overrides) -> RepositoryTrack:
 def _probe(**overrides) -> AudioProbe:
     values = {
         "duration_seconds": 182.5,
+        "start_time_seconds": 0.125,
         "sample_rate": 48000,
         "channels": 2,
         "codec_name": "mp3",
@@ -95,6 +106,138 @@ def _runner(payload: dict, seen_commands: list[list[str]] | None = None):
         return _completed(command, payload)
 
     return run
+
+
+def _signal_analyzer(
+    *,
+    seen_track_ids: list[str] | None = None,
+    waveform_peak: float = 0.8,
+    fail_track_ids: tuple[str, ...] = (),
+):
+    failures = set(fail_track_ids)
+
+    def analyze(track, identity, created_at_utc):
+        if seen_track_ids is not None:
+            seen_track_ids.append(track.track_id)
+        if track.track_id in failures:
+            raise AudioLoadError(
+                "audio_decode_error",
+                "Could not decode audio source: synthetic failure",
+                source_uri=track.source_uri,
+                track_id=track.track_id,
+            )
+        return _signal_result(
+            track.track_id,
+            identity.source_content_hash or "",
+            identity.parameters_hash or "",
+            created_at_utc,
+            waveform_peak=waveform_peak,
+        )
+
+    return analyze
+
+
+def _signal_result(
+    track_id: str,
+    source_content_hash: str,
+    parameters_hash: str,
+    created_at_utc: str,
+    *,
+    waveform_peak: float,
+) -> SignalAnalysisResult:
+    return SignalAnalysisResult(
+        waveform_artifact={
+            "schemaVersion": "1.0.0",
+            "trackId": track_id,
+            "analyzer": {
+                "producer": ANALYZER_PRODUCER,
+                "producerVersion": ANALYZER_VERSION,
+                "createdAtUtc": created_at_utc,
+                "sourceContentHash": source_content_hash,
+                "parametersHash": parameters_hash,
+            },
+            "durationSeconds": 12.5,
+            "sampleRate": 22050,
+            "parameters": {
+                "targetPointCount": 2,
+                "mode": "peak-rms",
+            },
+            "summary": {
+                "peak": waveform_peak,
+                "rms": 0.4,
+            },
+            "points": [
+                {"timeSeconds": 0.0, "min": -waveform_peak, "max": waveform_peak, "rms": 0.4},
+                {"timeSeconds": 6.25, "min": -0.2, "max": 0.2, "rms": 0.1},
+            ],
+        },
+        energy_features=EnergyFeatures(
+            global_energy=0.42,
+            curve=(
+                {"timeSeconds": 0.0, "value": 0.15},
+                {"timeSeconds": 4.0, "value": 0.55},
+                {"timeSeconds": 8.0, "value": 0.90},
+            ),
+            bass_energy_curve=(
+                {"timeSeconds": 0.0, "value": 0.10},
+                {"timeSeconds": 4.0, "value": 0.50},
+                {"timeSeconds": 8.0, "value": 0.85},
+            ),
+            onset_density_curve=(
+                {"timeSeconds": 0.0, "value": 0.05},
+                {"timeSeconds": 4.0, "value": 0.30},
+                {"timeSeconds": 8.0, "value": 0.75},
+            ),
+            warnings=(),
+            frame_length=2048,
+            hop_length=512,
+            curve_point_count=512,
+            bass_cutoff_hz=180.0,
+        ),
+        tempo_features=TempoFeatures(
+            bpm=140.0,
+            normalized_bpm=140.0,
+            confidence=0.76,
+            tempo_class="straight",
+            candidates=({"bpm": 140.0, "confidence": 0.76, "backend": "test"},),
+            beats=(
+                {"index": 0, "timeSeconds": 0.0, "confidence": 0.72},
+                {"index": 1, "timeSeconds": 0.428571, "confidence": 0.72},
+            ),
+            downbeats=(),
+            beat_grid_confidence=0.72,
+            warnings=("Downbeats were not emitted.",),
+            backend="test",
+            hop_length=512,
+        ),
+        structure_features=StructureFeatures(
+            sections=(
+                {
+                    "id": "section-drop-001",
+                    "type": "drop",
+                    "startSeconds": 8.0,
+                    "endSeconds": 12.5,
+                    "energyMean": 0.9,
+                    "energyPeak": 0.95,
+                    "confidence": 0.68,
+                },
+            ),
+            cue_points=(
+                {
+                    "id": "cue-drop-001",
+                    "type": "drop",
+                    "timeSeconds": 8.0,
+                    "sectionId": "section-drop-001",
+                    "confidence": 0.68,
+                    "tags": ["rough"],
+                },
+            ),
+            warnings=("Rough sections and cue candidates are heuristic.",),
+            backend="test",
+            high_energy_threshold=0.65,
+            low_energy_threshold=0.35,
+        ),
+    )
 
 
 def _write_manifest(tmp_path: Path, tracks: list[dict]) -> Path:
@@ -189,6 +332,7 @@ def test_build_analyzed_track_artifact_populates_real_probe_metadata() -> None:
     ffprobe = artifact["source"]["providerMetadata"]["ffprobe"]
     assert ffprobe["codecName"] == "mp3"
     assert ffprobe["codecLongName"] == "MP3 (MPEG audio layer 3)"
+    assert ffprobe["startTimeSeconds"] == 0.125
     assert ffprobe["bitRate"] == 320000
     assert ffprobe["formatName"] == "mp3"
     assert ffprobe["formatLongName"] == "MP2/3 (MPEG audio layer 2/3)"
@@ -293,12 +437,14 @@ def test_analyze_repository_manifest_analyzes_all_tracks_and_writes_artifacts(tm
     )
     cache_root = tmp_path / ".autodj-cache"
     seen_commands: list[list[str]] = []
+    seen_signals: list[str] = []
 
     result = analyze_repository_manifest(
         manifest_path,
         cache_root,
         ffprobe_path="fake-ffprobe",
         probe_runner=_runner(_ffprobe_payload(), seen_commands),
+        signal_analyzer=_signal_analyzer(seen_track_ids=seen_signals),
     )
 
     assert result.ok is True
@@ -309,11 +455,21 @@ def test_analyze_repository_manifest_analyzes_all_tracks_and_writes_artifacts(tm
     assert result.errors == ()
     assert [track.status for track in result.tracks] == ["analyzed", "analyzed"]
     assert len(seen_commands) == 2
+    assert seen_signals == ["track-a", "track-b"]
 
     artifact_a = json.loads(analyzed_track_path(cache_root, "track-a").read_text(encoding="utf-8"))
     artifact_b = json.loads(analyzed_track_path(cache_root, "track-b").read_text(encoding="utf-8"))
+    waveform_a = json.loads(waveform_path(cache_root, "track-a").read_text(encoding="utf-8"))
     assert artifact_a["trackId"] == "track-a"
     assert artifact_a["analyzer"]["sourceContentHash"] == "sha256:a"
+    assert artifact_a["tempo"]["confidence"] == 0.76
+    assert artifact_a["beatGrid"]["beats"]
+    assert artifact_a["energy"]["globalEnergy"] == 0.42
+    assert artifact_a["sections"][0]["type"] == "drop"
+    assert artifact_a["cuePoints"][0]["type"] == "drop"
+    assert "Signal analysis populated" in artifact_a["quality"]["warnings"][0]
+    assert waveform_a["trackId"] == "track-a"
+    assert waveform_a["analyzer"]["sourceContentHash"] == "sha256:a"
     assert artifact_b["trackId"] == "track-b"
 
     summary = result.to_dict()
@@ -321,17 +477,31 @@ def test_analyze_repository_manifest_analyzes_all_tracks_and_writes_artifacts(tm
     assert summary["total"] == 2
     assert summary["totalTracks"] == 2
     assert summary["tracks"][0]["artifactPath"] == str(analyzed_track_path(cache_root, "track-a"))
+    assert summary["tracks"][0]["waveformPath"] == str(waveform_path(cache_root, "track-a"))
 
 
 def test_analyze_repository_manifest_skips_current_artifacts_without_probing(tmp_path: Path) -> None:
     manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
     cache_root = tmp_path / ".autodj-cache"
-    analyze_repository_manifest(manifest_path, cache_root, probe_runner=_runner(_ffprobe_payload()))
+    analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload()),
+        signal_analyzer=_signal_analyzer(),
+    )
 
     def fail_if_called(command):
         raise AssertionError(f"unexpected ffprobe call: {command}")
 
-    result = analyze_repository_manifest(manifest_path, cache_root, probe_runner=fail_if_called)
+    def fail_signal(track, identity, created_at_utc):
+        raise AssertionError(f"unexpected signal analysis: {track.track_id}")
+
+    result = analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=fail_if_called,
+        signal_analyzer=fail_signal,
+    )
 
     assert result.ok is True
     assert result.analyzed == 0
@@ -344,13 +514,19 @@ def test_analyze_repository_manifest_skips_current_artifacts_without_probing(tmp
 def test_analyze_repository_manifest_rewrites_stale_artifacts(tmp_path: Path) -> None:
     manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:old"}])
     cache_root = tmp_path / ".autodj-cache"
-    analyze_repository_manifest(manifest_path, cache_root, probe_runner=_runner(_ffprobe_payload(duration=10.0)))
+    analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload(duration=10.0)),
+        signal_analyzer=_signal_analyzer(),
+    )
 
     manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:new"}])
     result = analyze_repository_manifest(
         manifest_path,
         cache_root,
         probe_runner=_runner(_ffprobe_payload(duration=22.0)),
+        signal_analyzer=_signal_analyzer(),
     )
 
     artifact = json.loads(analyzed_track_path(cache_root, "track-a").read_text(encoding="utf-8"))
@@ -364,20 +540,56 @@ def test_analyze_repository_manifest_rewrites_stale_artifacts(tmp_path: Path) ->
 def test_analyze_repository_manifest_force_rewrites_current_artifacts(tmp_path: Path) -> None:
     manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
     cache_root = tmp_path / ".autodj-cache"
-    analyze_repository_manifest(manifest_path, cache_root, probe_runner=_runner(_ffprobe_payload(duration=10.0)))
+    analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload(duration=10.0)),
+        signal_analyzer=_signal_analyzer(waveform_peak=0.25),
+    )
 
     result = analyze_repository_manifest(
         manifest_path,
         cache_root,
         force=True,
         probe_runner=_runner(_ffprobe_payload(duration=33.0)),
+        signal_analyzer=_signal_analyzer(waveform_peak=0.95),
     )
 
     artifact = json.loads(analyzed_track_path(cache_root, "track-a").read_text(encoding="utf-8"))
+    waveform = json.loads(waveform_path(cache_root, "track-a").read_text(encoding="utf-8"))
     assert result.analyzed == 1
     assert result.skipped == 0
     assert result.tracks[0].reason == "force"
     assert artifact["durationSeconds"] == 33.0
+    assert waveform["summary"]["peak"] == 0.95
+
+
+def test_analyze_repository_manifest_rewrites_when_waveform_artifact_is_stale(tmp_path: Path) -> None:
+    manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
+    cache_root = tmp_path / ".autodj-cache"
+    analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload(duration=10.0)),
+        signal_analyzer=_signal_analyzer(waveform_peak=0.25),
+    )
+    waveform_path(cache_root, "track-a").unlink()
+    seen_signals: list[str] = []
+
+    result = analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload(duration=10.0)),
+        signal_analyzer=_signal_analyzer(seen_track_ids=seen_signals, waveform_peak=0.75),
+    )
+
+    waveform = json.loads(waveform_path(cache_root, "track-a").read_text(encoding="utf-8"))
+    assert result.ok is True
+    assert result.analyzed == 1
+    assert result.skipped == 0
+    assert result.tracks[0].reason == "waveform_artifact_missing"
+    assert seen_signals == ["track-a"]
+    assert waveform["summary"]["peak"] == 0.75
 
 
 def test_analyze_repository_manifest_continues_after_per_track_failure(tmp_path: Path) -> None:
@@ -395,6 +607,7 @@ def test_analyze_repository_manifest_continues_after_per_track_failure(tmp_path:
         manifest_path,
         cache_root,
         probe_runner=_runner(_ffprobe_payload(), seen_commands),
+        signal_analyzer=_signal_analyzer(),
     )
 
     assert result.ok is False
@@ -412,3 +625,101 @@ def test_analyze_repository_manifest_continues_after_per_track_failure(tmp_path:
     assert failed_track.error["trackId"] == "track-missing"
     assert failed_track.error["sourceUri"] == "track-missing.mp3"
     assert result.errors == (failed_track.error,)
+
+
+def test_analyze_repository_manifest_continues_after_signal_failure(tmp_path: Path) -> None:
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {"track_id": "track-good", "content_hash": "sha256:good"},
+            {"track_id": "track-bad", "content_hash": "sha256:bad"},
+        ],
+    )
+    cache_root = tmp_path / ".autodj-cache"
+    seen_commands: list[list[str]] = []
+
+    result = analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload(), seen_commands),
+        signal_analyzer=_signal_analyzer(fail_track_ids=("track-bad",)),
+    )
+
+    assert result.ok is False
+    assert result.total_tracks == 2
+    assert result.analyzed == 1
+    assert result.skipped == 0
+    assert result.failed == 1
+    assert len(seen_commands) == 2
+    assert analyzed_track_path(cache_root, "track-good").exists()
+    assert waveform_path(cache_root, "track-good").exists()
+
+    failed_track = result.tracks[1]
+    assert failed_track.status == "failed"
+    assert failed_track.artifact_path == analyzed_track_path(cache_root, "track-bad")
+    assert failed_track.waveform_path == waveform_path(cache_root, "track-bad")
+    assert failed_track.error is not None
+    assert failed_track.error["code"] == "audio_decode_error"
+    assert failed_track.error["trackId"] == "track-bad"
+    assert failed_track.error["sourceUri"] == "track-bad.mp3"
+
+
+@pytest.mark.analysis
+def test_analyze_repository_manifest_runs_real_signal_analysis_for_generated_audio(tmp_path: Path) -> None:
+    _skip_without_analysis_dependencies()
+    fixture = create_energy_ramp_fixture(tmp_path / "music", duration_seconds=6.0)
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {
+                "track_id": "track-ramp",
+                "filename": fixture.path.name,
+                "content_hash": "sha256:ramp",
+                "create_source": False,
+                "title": "Generated Ramp",
+            },
+        ],
+    )
+    cache_root = tmp_path / ".autodj-cache"
+
+    result = analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(
+            _ffprobe_payload(
+                duration=fixture.duration_seconds,
+                sample_rate=fixture.sample_rate,
+                channels=1,
+            )
+        ),
+    )
+
+    artifact = json.loads(analyzed_track_path(cache_root, "track-ramp").read_text(encoding="utf-8"))
+    waveform = json.loads(waveform_path(cache_root, "track-ramp").read_text(encoding="utf-8"))
+
+    assert result.ok is True
+    assert result.analyzed == 1
+    assert result.failed == 0
+    assert artifact["analyzer"]["producer"] == ANALYZER_PRODUCER
+    assert artifact["analyzer"]["sourceContentHash"] == "sha256:ramp"
+    assert artifact["energy"]["curve"]
+    assert artifact["energy"]["curve"][-1]["value"] > artifact["energy"]["curve"][0]["value"]
+    assert any(section["type"] == "drop" for section in artifact["sections"])
+    assert any(cue["type"] == "drop" for cue in artifact["cuePoints"])
+    assert waveform["trackId"] == "track-ramp"
+    assert waveform["points"]
+    assert result.to_dict()["tracks"][0]["waveformPath"] == str(waveform_path(cache_root, "track-ramp"))
+
+
+def _skip_without_analysis_dependencies() -> None:
+    missing = [
+        module
+        for module in ["numpy", "scipy", "librosa", "soundfile"]
+        if importlib.util.find_spec(module) is None
+    ]
+    if missing:
+        pytest.skip(
+            "analysis dependencies are not installed; missing "
+            + ", ".join(missing)
+            + ". Install the worker with `[analysis]`."
+        )

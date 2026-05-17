@@ -50,6 +50,7 @@ class AudioProbe:
     format_long_name: str | None
     tags: dict[str, str] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    start_time_seconds: float | None = None
 
 
 def probe_audio(
@@ -156,6 +157,7 @@ def parse_ffprobe_output(
 
     return AudioProbe(
         duration_seconds=_first_float(stream.get("duration"), format_payload.get("duration")),
+        start_time_seconds=_first_float(stream.get("start_time"), format_payload.get("start_time")),
         sample_rate=_optional_int(stream.get("sample_rate")),
         channels=_optional_int(stream.get("channels")),
         codec_name=_optional_string(stream.get("codec_name")),

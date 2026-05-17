@@ -1,0 +1,1716 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoDJ Analysis Debug Viewer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f4ef;
+      --surface: #ffffff;
+      --surface-2: #ece8df;
+      --text: #201f1b;
+      --muted: #68645b;
+      --line: #d4cec2;
+      --wave: #2d5962;
+      --wave-fill: rgba(45, 89, 98, 0.26);
+      --rms: #7b5eaa;
+      --energy: #b05b32;
+      --beat: rgba(30, 121, 91, 0.42);
+      --bar: rgba(30, 121, 91, 0.8);
+      --cue: #c33b42;
+      --section: rgba(235, 171, 75, 0.28);
+      --reference: rgba(40, 98, 184, 0.42);
+      --selection: rgba(30, 121, 91, 0.18);
+      --playhead: #101010;
+      --focus: #1e795b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .wrap {
+      width: min(1440px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    header .wrap {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 680;
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      min-height: 20px;
+      text-align: right;
+    }
+
+    main {
+      padding: 18px 0 28px;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(260px, 1fr)) repeat(6, minmax(120px, max-content));
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 14px;
+    }
+
+    label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    input[type="file"],
+    input[type="number"],
+    select {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+      padding: 7px 9px;
+    }
+
+    input:focus,
+    select:focus {
+      outline: 2px solid rgba(30, 121, 91, 0.28);
+      border-color: var(--focus);
+    }
+
+    .button-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font: inherit;
+      font-weight: 650;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: var(--focus);
+    }
+
+    .canvas-shell {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+    }
+
+    #canvas {
+      height: min(54vh, 560px);
+      min-height: 360px;
+      cursor: grab;
+    }
+
+    #canvas.dragging {
+      cursor: grabbing;
+    }
+
+    #overviewCanvas {
+      height: 118px;
+      min-height: 118px;
+      border-top: 1px solid var(--line);
+      cursor: crosshair;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      align-items: center;
+      border-top: 1px solid var(--line);
+      padding: 10px 12px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .swatch {
+      width: 18px;
+      height: 3px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    .metric,
+    .table-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .metric {
+      padding: 10px 12px;
+      min-width: 0;
+    }
+
+    .metric .name {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    .metric .value {
+      margin-top: 3px;
+      font-size: 18px;
+      font-weight: 720;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tables {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .table-panel {
+      overflow: hidden;
+    }
+
+    .table-panel h2 {
+      margin: 0;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    td {
+      word-break: break-word;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 12px;
+    }
+
+    @media (max-width: 1100px) {
+      .toolbar,
+      .summary,
+      .tables {
+        grid-template-columns: 1fr;
+      }
+
+      header .wrap {
+        display: block;
+      }
+
+      .status {
+        margin-top: 4px;
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>AutoDJ Analysis Debug Viewer</h1>
+      <div id="status" class="status">Load an analyzed track artifact and a waveform artifact.</div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="toolbar" aria-label="Artifact controls">
+      <label>
+        Analyzed track JSON
+        <input id="analysisInput" type="file" accept="application/json,.json">
+      </label>
+      <label>
+        Waveform or RGB debug JSON
+        <input id="waveformInput" type="file" accept="application/json,.json">
+      </label>
+      <label>
+        Audio file
+        <input id="audioInput" type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.aiff,.ogg">
+      </label>
+      <label>
+        Beat labels
+        <select id="labelEvery">
+          <option value="4">Every 4 beats</option>
+          <option value="8">Every 8 beats</option>
+          <option value="16" selected>Every 16 beats</option>
+          <option value="32">Every 32 beats</option>
+          <option value="0">Hide labels</option>
+        </select>
+      </label>
+      <label>
+        Reference BPM
+        <input id="referenceBpm" type="number" min="30" max="260" step="0.001" placeholder="140">
+      </label>
+      <label>
+        Ref anchor sec
+        <input id="referenceAnchor" type="number" min="0" step="0.001" placeholder="first beat">
+      </label>
+      <label>
+        Zoom window
+        <select id="zoomWindow">
+          <option value="0">Full song</option>
+          <option value="64">64 seconds</option>
+          <option value="32">32 seconds</option>
+          <option value="16">16 seconds</option>
+          <option value="8">8 seconds</option>
+          <option value="4">4 seconds</option>
+          <option value="2">2 seconds</option>
+          <option value="1">1 second</option>
+          <option value="0.5">0.5 seconds</option>
+          <option value="0.25">0.25 seconds</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      <label>
+        Center sec
+        <input id="viewCenter" type="number" min="0" step="0.001" placeholder="0.000">
+      </label>
+      <div class="button-row">
+        <button id="playPauseButton" type="button">Play</button>
+        <button id="fitButton" type="button">Fit</button>
+        <button id="clearButton" type="button">Clear</button>
+      </div>
+    </section>
+
+    <section class="canvas-shell" aria-label="Waveform visualization">
+      <canvas id="canvas"></canvas>
+      <canvas id="overviewCanvas" aria-label="Full-song overview"></canvas>
+      <div class="legend">
+        <span style="color: var(--wave);"><i class="swatch"></i>Waveform peak</span>
+        <span style="color: var(--rms);"><i class="swatch"></i>RMS</span>
+        <span style="color: var(--energy);"><i class="swatch"></i>Energy</span>
+        <span style="color: var(--bar);"><i class="swatch"></i>Beat grid</span>
+        <span style="color: var(--cue);"><i class="swatch"></i>Cue points</span>
+        <span style="color: var(--section);"><i class="swatch"></i>Sections</span>
+        <span style="color: var(--reference);"><i class="swatch"></i>Reference grid</span>
+        <span style="color: var(--focus);"><i class="swatch"></i>Zoom selection</span>
+        <span style="color: var(--playhead);"><i class="swatch"></i>Playhead</span>
+      </div>
+    </section>
+
+    <section id="summary" class="summary" aria-label="Summary metrics"></section>
+
+    <section class="tables" aria-label="Cue and section details">
+      <article class="table-panel">
+        <h2>Cue Points</h2>
+        <div id="cueTable"></div>
+      </article>
+      <article class="table-panel">
+        <h2>Sections</h2>
+        <div id="sectionTable"></div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      analysis: null,
+      waveform: null,
+      hoverTime: null,
+      viewStart: 0,
+      viewDuration: null,
+      isDragging: false,
+      pointerDown: false,
+      dragMoved: false,
+      dragStartX: 0,
+      dragStartY: 0,
+      dragStartViewStart: 0,
+      pointerDownTime: null,
+      audioUrl: null,
+      loadNames: {},
+    };
+
+    const MIN_VIEW_SECONDS = 0.05;
+    const CLICK_MOVE_TOLERANCE_PX = 4;
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const overviewCanvas = document.getElementById("overviewCanvas");
+    const overviewCtx = overviewCanvas.getContext("2d");
+    const audio = new Audio();
+    let playbackFrameId = null;
+    const statusEl = document.getElementById("status");
+    const summaryEl = document.getElementById("summary");
+    const cueTableEl = document.getElementById("cueTable");
+    const sectionTableEl = document.getElementById("sectionTable");
+    const labelEveryEl = document.getElementById("labelEvery");
+    const referenceBpmEl = document.getElementById("referenceBpm");
+    const referenceAnchorEl = document.getElementById("referenceAnchor");
+    const zoomWindowEl = document.getElementById("zoomWindow");
+    const viewCenterEl = document.getElementById("viewCenter");
+    const playPauseButton = document.getElementById("playPauseButton");
+
+    document.getElementById("analysisInput").addEventListener("change", event => {
+      loadJsonFile(event.target.files[0], "analysis");
+    });
+    document.getElementById("waveformInput").addEventListener("change", event => {
+      loadJsonFile(event.target.files[0], "waveform");
+    });
+    document.getElementById("audioInput").addEventListener("change", event => {
+      loadAudioFile(event.target.files[0]);
+    });
+    playPauseButton.addEventListener("click", togglePlayback);
+    document.getElementById("fitButton").addEventListener("click", () => {
+      setFullView();
+      render();
+    });
+    document.getElementById("clearButton").addEventListener("click", clearState);
+    labelEveryEl.addEventListener("change", render);
+    referenceBpmEl.addEventListener("input", render);
+    referenceAnchorEl.addEventListener("input", render);
+    zoomWindowEl.addEventListener("change", () => {
+      const fullDuration = getDuration();
+      const selected = Number(zoomWindowEl.value);
+      if (!fullDuration || zoomWindowEl.value === "custom") {
+        return;
+      }
+      if (!selected) {
+        setFullView();
+      } else {
+        const center = Number(viewCenterEl.value);
+        const fallback = getView(fullDuration).start + getView(fullDuration).duration / 2;
+        setViewCentered(Number.isFinite(center) ? center : fallback, selected, fullDuration);
+      }
+      render();
+    });
+    viewCenterEl.addEventListener("input", () => {
+      const fullDuration = getDuration();
+      const center = Number(viewCenterEl.value);
+      if (fullDuration && Number.isFinite(center)) {
+        setViewCentered(center, getView(fullDuration).duration, fullDuration);
+        render();
+      }
+    });
+    window.addEventListener("resize", render);
+
+    audio.preload = "auto";
+    audio.addEventListener("loadedmetadata", render);
+    audio.addEventListener("timeupdate", render);
+    audio.addEventListener("seeked", render);
+    audio.addEventListener("play", () => {
+      updatePlaybackButton();
+      startPlaybackRender();
+    });
+    audio.addEventListener("pause", () => {
+      updatePlaybackButton();
+      render();
+    });
+    audio.addEventListener("ended", () => {
+      updatePlaybackButton();
+      render();
+    });
+
+    canvas.addEventListener("mousedown", event => {
+      if (event.button !== 0) {
+        return;
+      }
+      const fullDuration = getDuration();
+      const view = getView(fullDuration);
+      const rect = canvas.getBoundingClientRect();
+      const area = plotArea(rect.width, rect.height);
+      const x = clamp(event.clientX - rect.left, area.left, area.right);
+      if (!fullDuration) {
+        return;
+      }
+      state.pointerDown = true;
+      state.dragMoved = false;
+      state.dragStartX = event.clientX;
+      state.dragStartY = event.clientY;
+      state.dragStartViewStart = view.start;
+      state.pointerDownTime = xToTime(area, view, x);
+      if (view.duration < fullDuration) {
+        state.isDragging = true;
+        canvas.classList.add("dragging");
+      }
+    });
+
+    canvas.addEventListener("mousemove", event => {
+      if (state.isDragging) {
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const area = plotArea(rect.width, rect.height);
+      const view = getView(getDuration());
+      const x = clamp(event.clientX - rect.left, area.left, area.right);
+      state.hoverTime = view.duration ? xToTime(area, view, x) : null;
+      render();
+    });
+    canvas.addEventListener("mouseleave", () => {
+      if (!state.isDragging) {
+        state.hoverTime = null;
+        render();
+      }
+    });
+    canvas.addEventListener("wheel", event => {
+      const fullDuration = getDuration();
+      if (!fullDuration) {
+        return;
+      }
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const area = plotArea(rect.width, rect.height);
+      const view = getView(fullDuration);
+      const x = clamp(event.clientX - rect.left, area.left, area.right);
+      const focusRatio = clamp((x - area.left) / area.width, 0, 1);
+      const focusTime = xToTime(area, view, x);
+      const factor = event.deltaY > 0 ? 1.22 : 1 / 1.22;
+      const nextDuration = clamp(view.duration * factor, MIN_VIEW_SECONDS, fullDuration);
+      setViewAround(focusTime, nextDuration, focusRatio, fullDuration);
+      state.hoverTime = focusTime;
+      render();
+    }, { passive: false });
+
+    overviewCanvas.addEventListener("mousedown", event => {
+      if (event.button !== 0) {
+        return;
+      }
+      centerViewFromOverviewEvent(event, true);
+    });
+    overviewCanvas.addEventListener("mousemove", event => {
+      if (event.buttons === 1) {
+        centerViewFromOverviewEvent(event, false);
+      }
+    });
+
+    window.addEventListener("mousemove", event => {
+      if (!state.isDragging) {
+        return;
+      }
+      const fullDuration = getDuration();
+      const view = getView(fullDuration);
+      const rect = canvas.getBoundingClientRect();
+      const area = plotArea(rect.width, rect.height);
+      const deltaX = event.clientX - state.dragStartX;
+      const deltaY = event.clientY - state.dragStartY;
+      if (Math.abs(deltaX) > CLICK_MOVE_TOLERANCE_PX || Math.abs(deltaY) > CLICK_MOVE_TOLERANCE_PX) {
+        state.dragMoved = true;
+      }
+      if (!state.dragMoved) {
+        return;
+      }
+      const deltaSeconds = (deltaX / area.width) * view.duration;
+      setView(state.dragStartViewStart - deltaSeconds, view.duration, fullDuration);
+      render();
+    });
+    window.addEventListener("mouseup", () => {
+      if (state.pointerDown && !state.dragMoved && Number.isFinite(state.pointerDownTime)) {
+        seekPlayback(state.pointerDownTime);
+      }
+      state.pointerDown = false;
+      state.pointerDownTime = null;
+      if (state.isDragging) {
+        state.isDragging = false;
+        canvas.classList.remove("dragging");
+        render();
+      }
+    });
+
+    for (const type of ["dragenter", "dragover"]) {
+      document.addEventListener(type, event => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      });
+    }
+
+    document.addEventListener("drop", event => {
+      event.preventDefault();
+      const files = Array.from(event.dataTransfer.files || []);
+      for (const file of files) {
+        if (isAudioFile(file)) {
+          loadAudioFile(file);
+        } else {
+          loadJsonFile(file, guessFileKind(file.name));
+        }
+      }
+    });
+
+    function guessFileKind(name) {
+      const lower = String(name || "").toLowerCase();
+      return lower.includes("waveform") ? "waveform" : "analysis";
+    }
+
+    function isAudioFile(file) {
+      const lower = String(file && file.name || "").toLowerCase();
+      return Boolean(
+        file
+        && (
+          String(file.type || "").startsWith("audio/")
+          || [".mp3", ".wav", ".flac", ".m4a", ".aiff", ".aif", ".ogg"].some(ext => lower.endsWith(ext))
+        )
+      );
+    }
+
+    function loadAudioFile(file) {
+      if (!file) {
+        return;
+      }
+
+      audio.pause();
+      if (state.audioUrl) {
+        URL.revokeObjectURL(state.audioUrl);
+      }
+      state.audioUrl = URL.createObjectURL(file);
+      audio.src = state.audioUrl;
+      audio.load();
+      state.loadNames.audio = file.name;
+      updateStatus();
+      updatePlaybackButton();
+      render();
+    }
+
+    async function loadJsonFile(file, kind) {
+      if (!file) {
+        return;
+      }
+
+      try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        if (kind === "waveform" || payload.points) {
+          state.waveform = payload;
+          state.loadNames.waveform = file.name;
+        } else {
+          state.analysis = payload;
+          state.loadNames.analysis = file.name;
+        }
+        updateStatus();
+        render();
+      } catch (error) {
+        statusEl.textContent = `Could not load ${file.name}: ${error.message}`;
+      }
+    }
+
+    async function togglePlayback() {
+      if (!hasAudio()) {
+        statusEl.textContent = "Load an audio file before playback.";
+        return;
+      }
+
+      if (audio.paused) {
+        try {
+          await audio.play();
+        } catch (error) {
+          statusEl.textContent = `Could not start playback: ${error.message}`;
+        }
+      } else {
+        audio.pause();
+      }
+      updatePlaybackButton();
+      render();
+    }
+
+    function seekPlayback(timeSeconds) {
+      if (!hasAudio()) {
+        state.hoverTime = timeSeconds;
+        render();
+        return;
+      }
+
+      const duration = getAudioDuration();
+      audio.currentTime = clamp(timeSeconds, 0, duration || getDuration());
+      render();
+    }
+
+    function hasAudio() {
+      return Boolean(audio.src);
+    }
+
+    function getAudioDuration() {
+      return Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+    }
+
+    function updatePlaybackButton() {
+      playPauseButton.textContent = !hasAudio() || audio.paused ? "Play" : "Pause";
+    }
+
+    function startPlaybackRender() {
+      if (playbackFrameId !== null) {
+        return;
+      }
+
+      const tick = () => {
+        playbackFrameId = null;
+        render();
+        if (!audio.paused && !audio.ended) {
+          playbackFrameId = requestAnimationFrame(tick);
+        }
+      };
+      playbackFrameId = requestAnimationFrame(tick);
+    }
+
+    function clearState() {
+      state.analysis = null;
+      state.waveform = null;
+      state.hoverTime = null;
+      state.viewStart = 0;
+      state.viewDuration = null;
+      state.isDragging = false;
+      state.pointerDown = false;
+      state.dragMoved = false;
+      state.pointerDownTime = null;
+      state.loadNames = {};
+      audio.pause();
+      if (state.audioUrl) {
+        URL.revokeObjectURL(state.audioUrl);
+      }
+      state.audioUrl = null;
+      audio.removeAttribute("src");
+      audio.load();
+      document.getElementById("analysisInput").value = "";
+      document.getElementById("waveformInput").value = "";
+      document.getElementById("audioInput").value = "";
+      referenceBpmEl.value = "";
+      referenceAnchorEl.value = "";
+      zoomWindowEl.value = "0";
+      viewCenterEl.value = "";
+      updateStatus();
+      updatePlaybackButton();
+      render();
+    }
+
+    function updateStatus() {
+      const names = [];
+      if (state.loadNames.analysis) {
+        names.push(state.loadNames.analysis);
+      }
+      if (state.loadNames.waveform) {
+        names.push(state.loadNames.waveform);
+      }
+      if (state.loadNames.audio) {
+        names.push(state.loadNames.audio);
+      }
+      statusEl.textContent = names.length ? names.join(" + ") : "Load analyzed track, waveform, and audio files.";
+    }
+
+    function render() {
+      const rect = canvas.getBoundingClientRect();
+      const overviewRect = overviewCanvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(320, Math.round(rect.width));
+      const height = Math.max(320, Math.round(rect.height));
+      const overviewWidth = Math.max(320, Math.round(overviewRect.width));
+      const overviewHeight = Math.max(96, Math.round(overviewRect.height));
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      overviewCanvas.width = Math.round(overviewWidth * dpr);
+      overviewCanvas.height = Math.round(overviewHeight * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      overviewCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawCanvas(width, height);
+      drawOverviewCanvas(overviewWidth, overviewHeight);
+      syncZoomControls();
+      updatePlaybackButton();
+      drawSummary();
+      drawTables();
+    }
+
+    function drawCanvas(width, height) {
+      const area = plotArea(width, height);
+      const view = getView(getDuration());
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+
+      drawGrid(area, view);
+
+      if (!state.analysis && !state.waveform) {
+        ctx.fillStyle = "#68645b";
+        ctx.font = "14px system-ui, sans-serif";
+        ctx.fillText("Drop analyzed-track.json and waveform.json here.", area.left, area.top + 22);
+        return;
+      }
+
+      drawSections(area, view);
+      drawWaveform(area, view);
+      drawEnergy(area, view);
+      drawReferenceGrid(area, view);
+      drawBeats(area, view);
+      drawCues(area, view);
+      drawPlaybackCursor(area, view);
+      drawHover(area, view);
+      drawAxisLabels(area, view);
+    }
+
+    function plotArea(width, height) {
+      const left = 58;
+      const rightPad = 22;
+      const top = 28;
+      const bottomPad = 34;
+      return {
+        left,
+        top,
+        right: width - rightPad,
+        bottom: height - bottomPad,
+        width: Math.max(1, width - left - rightPad),
+        height: Math.max(1, height - top - bottomPad),
+      };
+    }
+
+    function getDuration() {
+      const values = [
+        state.waveform && Number(state.waveform.durationSeconds),
+        state.analysis && Number(state.analysis.durationSeconds),
+        getAudioDuration(),
+        lastTime(state.waveform && state.waveform.points),
+        lastBeatTime(),
+      ].filter(value => Number.isFinite(value) && value > 0);
+      return values.length ? Math.max(...values) : 0;
+    }
+
+    function getView(fullDuration) {
+      const duration = Number(fullDuration) || 0;
+      if (!duration) {
+        return { start: 0, end: 0, duration: 0, fullDuration: 0 };
+      }
+
+      const requestedDuration = Number(state.viewDuration);
+      const viewDuration = Number.isFinite(requestedDuration) && requestedDuration > 0
+        ? clamp(requestedDuration, MIN_VIEW_SECONDS, duration)
+        : duration;
+      const start = clamp(Number(state.viewStart) || 0, 0, Math.max(0, duration - viewDuration));
+      return {
+        start,
+        end: start + viewDuration,
+        duration: viewDuration,
+        fullDuration: duration,
+      };
+    }
+
+    function setFullView() {
+      state.viewStart = 0;
+      state.viewDuration = null;
+    }
+
+    function setView(start, duration, fullDuration) {
+      const total = Number(fullDuration) || getDuration();
+      if (!total) {
+        setFullView();
+        return;
+      }
+
+      const nextDuration = clamp(Number(duration) || total, MIN_VIEW_SECONDS, total);
+      state.viewDuration = nextDuration >= total ? null : nextDuration;
+      state.viewStart = state.viewDuration === null
+        ? 0
+        : clamp(Number(start) || 0, 0, Math.max(0, total - nextDuration));
+    }
+
+    function setViewCentered(center, duration, fullDuration) {
+      const total = Number(fullDuration) || getDuration();
+      const nextDuration = Number(duration) || total;
+      setView(Number(center) - nextDuration / 2, nextDuration, total);
+    }
+
+    function setViewAround(focusTime, duration, focusRatio, fullDuration) {
+      const ratio = clamp(Number(focusRatio), 0, 1);
+      const nextDuration = Number(duration) || getDuration();
+      setView(Number(focusTime) - nextDuration * ratio, nextDuration, fullDuration);
+    }
+
+    function centerViewFromOverviewEvent(event, shouldSeek = false) {
+      const fullDuration = getDuration();
+      if (!fullDuration) {
+        return;
+      }
+      const rect = overviewCanvas.getBoundingClientRect();
+      const area = overviewPlotArea(rect.width, rect.height);
+      const x = clamp(event.clientX - rect.left, area.left, area.right);
+      const time = ((x - area.left) / area.width) * fullDuration;
+      setViewCentered(time, getView(fullDuration).duration, fullDuration);
+      if (shouldSeek) {
+        seekPlayback(time);
+      }
+      render();
+    }
+
+    function syncZoomControls() {
+      const fullDuration = getDuration();
+      const view = getView(fullDuration);
+      if (!fullDuration) {
+        viewCenterEl.value = "";
+        return;
+      }
+
+      const center = view.start + view.duration / 2;
+      viewCenterEl.max = String(fullDuration);
+      if (document.activeElement !== viewCenterEl) {
+        viewCenterEl.value = center.toFixed(3);
+      }
+
+      const options = Array.from(zoomWindowEl.options).map(option => option.value);
+      const matching = view.duration >= fullDuration
+        ? "0"
+        : options.find(value => value !== "custom" && Math.abs(Number(value) - view.duration) < 0.001);
+      zoomWindowEl.value = matching || "custom";
+    }
+
+    function lastTime(points) {
+      if (!Array.isArray(points) || points.length === 0) {
+        return 0;
+      }
+      return Number(points[points.length - 1].timeSeconds) || 0;
+    }
+
+    function lastBeatTime() {
+      const beats = getBeats();
+      if (!beats.length) {
+        return 0;
+      }
+      return Number(beats[beats.length - 1].timeSeconds) || 0;
+    }
+
+    function timeToX(area, view, time) {
+      return area.left + ((Number(time) - view.start) / Math.max(view.duration, 0.001)) * area.width;
+    }
+
+    function getWaveformTimelineOffsetSeconds() {
+      const metadata = state.analysis
+        && state.analysis.source
+        && state.analysis.source.providerMetadata;
+      const ffprobe = metadata && metadata.ffprobe;
+      const startTime = Number(ffprobe && ffprobe.startTimeSeconds);
+      if (Number.isFinite(startTime) && startTime > 0) {
+        return startTime;
+      }
+      return 0;
+    }
+
+    function waveformPointStart(points, index) {
+      return Number(points[index] && points[index].timeSeconds) + getWaveformTimelineOffsetSeconds();
+    }
+
+    function waveformPointEnd(points, index, fallbackDuration = getDuration()) {
+      const start = waveformPointStart(points, index);
+      const next = waveformPointStart(points, index + 1);
+      if (Number.isFinite(next) && next > start) {
+        return next;
+      }
+
+      const previous = waveformPointStart(points, index - 1);
+      if (Number.isFinite(previous) && start > previous) {
+        return start + (start - previous);
+      }
+
+      if (Number.isFinite(fallbackDuration) && fallbackDuration > start) {
+        return fallbackDuration;
+      }
+
+      return start;
+    }
+
+    function waveformPointCenter(points, index, fallbackDuration = getDuration()) {
+      const start = waveformPointStart(points, index);
+      const end = waveformPointEnd(points, index, fallbackDuration);
+      return start + Math.max(0, end - start) / 2;
+    }
+
+    function waveformPointPixelWidth(area, view, points, index, fallbackDuration = getDuration()) {
+      const startX = timeToX(area, view, waveformPointStart(points, index));
+      const endX = timeToX(area, view, waveformPointEnd(points, index, fallbackDuration));
+      return Math.max(1, Math.abs(endX - startX));
+    }
+
+    function xToTime(area, view, x) {
+      return view.start + ((x - area.left) / area.width) * view.duration;
+    }
+
+    function drawGrid(area, view) {
+      ctx.strokeStyle = "#e5dfd2";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i <= 4; i += 1) {
+        const y = area.top + (i / 4) * area.height;
+        ctx.moveTo(area.left, y);
+        ctx.lineTo(area.right, y);
+      }
+      const tickStep = chooseTickStep(view.duration);
+      if (view.duration > 0) {
+        const firstTick = Math.ceil(view.start / tickStep) * tickStep;
+        for (let time = firstTick; time <= view.end + 0.001; time += tickStep) {
+          const x = timeToX(area, view, time);
+          ctx.moveTo(x, area.top);
+          ctx.lineTo(x, area.bottom);
+        }
+      }
+      ctx.stroke();
+    }
+
+    function drawWaveform(area, view) {
+      const points = state.waveform && Array.isArray(state.waveform.points) ? state.waveform.points : [];
+      if (view.duration <= 0) {
+        return;
+      }
+
+      const peak = Math.max(0.001, Number(state.waveform.summary && state.waveform.summary.peak) || 1);
+      const mid = area.top + area.height * 0.46;
+      const amp = area.height * 0.38;
+
+      if (!points.length) {
+        return;
+      }
+
+      const padding = view.duration / Math.max(area.width, 1) * 4;
+      const visiblePoints = points.filter((point, index) => {
+        const start = waveformPointStart(points, index);
+        const end = waveformPointEnd(points, index);
+        return Number.isFinite(start) && start <= view.end + padding && end >= view.start - padding;
+      });
+      if (!visiblePoints.length) {
+        return;
+      }
+
+      if (hasRgbWaveformPoints(visiblePoints)) {
+        drawRgbWaveform(area, view, visiblePoints, peak, mid, amp);
+        return;
+      }
+
+      ctx.beginPath();
+      visiblePoints.forEach((point, index) => {
+        const x = timeToX(area, view, waveformPointCenter(visiblePoints, index));
+        const y = mid - clamp(Number(point.max) / peak, -1, 1) * amp;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      for (let index = visiblePoints.length - 1; index >= 0; index -= 1) {
+        const point = visiblePoints[index];
+        const x = timeToX(area, view, waveformPointCenter(visiblePoints, index));
+        const y = mid - clamp(Number(point.min) / peak, -1, 1) * amp;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = getCss("--wave-fill");
+      ctx.fill();
+
+      ctx.strokeStyle = getCss("--wave");
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      visiblePoints.forEach((point, index) => {
+        const x = timeToX(area, view, waveformPointCenter(visiblePoints, index));
+        const y = mid - clamp(Number(point.rms) / peak, 0, 1) * amp;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.strokeStyle = getCss("--rms");
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+
+    function hasRgbWaveformPoints(points) {
+      return Boolean(
+        points.length
+        && points[0].low != null
+        && points[0].mid != null
+        && points[0].high != null
+      );
+    }
+
+    function drawRgbWaveform(area, view, points, peak, mid, amp) {
+      ctx.save();
+      ctx.lineCap = "butt";
+      points.forEach((point, index) => {
+        const x = timeToX(area, view, waveformPointCenter(points, index));
+        const width = waveformPointPixelWidth(area, view, points, index);
+        const yMax = mid - clamp(Number(point.max) / peak, -1, 1) * amp;
+        const yMin = mid - clamp(Number(point.min) / peak, -1, 1) * amp;
+
+        ctx.strokeStyle = rgbWaveColor(point);
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(x, yMax);
+        ctx.lineTo(x, yMin);
+        ctx.stroke();
+      });
+
+      points.forEach((point, index) => {
+        const transient = clamp(Number(point.transient) || 0, 0, 1);
+        if (transient < 0.28) {
+          return;
+        }
+        const x = timeToX(area, view, waveformPointCenter(points, index));
+        const width = Math.max(1, waveformPointPixelWidth(area, view, points, index) * 0.7);
+
+        ctx.strokeStyle = `rgba(255, 241, 179, ${0.22 + transient * 0.58})`;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(x, area.top);
+        ctx.lineTo(x, area.bottom);
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    function rgbWaveColor(point) {
+      const low = Math.pow(clamp(Number(point.low) || 0, 0, 1), 0.58);
+      const mid = Math.pow(clamp(Number(point.mid) || 0, 0, 1), 0.64);
+      const high = Math.pow(clamp(Number(point.high) || 0, 0, 1), 0.58);
+      const transient = Math.pow(clamp(Number(point.transient) || 0, 0, 1), 0.7);
+      const energy = clamp(Number(point.rms) || Math.max(low, mid, high), 0, 1);
+
+      const r = Math.round(clamp(26 + low * 210 + mid * 62 + transient * 128, 0, 255));
+      const g = Math.round(clamp(28 + mid * 198 + high * 58 + transient * 118, 0, 255));
+      const b = Math.round(clamp(34 + high * 216 + mid * 40 + transient * 92, 0, 255));
+      const alpha = clamp(0.34 + Math.max(energy, low, mid, high, transient) * 0.62, 0.34, 0.98);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function drawEnergy(area, view) {
+      const curve = state.analysis && state.analysis.energy && Array.isArray(state.analysis.energy.curve)
+        ? state.analysis.energy.curve
+        : [];
+      if (!curve.length || view.duration <= 0) {
+        return;
+      }
+
+      const top = area.top + area.height * 0.62;
+      const height = area.height * 0.28;
+      const padding = view.duration / Math.max(area.width, 1) * 4;
+      const visibleCurve = curve.filter(point => {
+        const time = Number(point.timeSeconds);
+        return Number.isFinite(time) && time >= view.start - padding && time <= view.end + padding;
+      });
+      if (!visibleCurve.length) {
+        return;
+      }
+      ctx.beginPath();
+      visibleCurve.forEach((point, index) => {
+        const x = timeToX(area, view, point.timeSeconds);
+        const y = top + height - clamp(Number(point.value), 0, 1) * height;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.strokeStyle = getCss("--energy");
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+    }
+
+    function drawBeats(area, view) {
+      const beats = getBeats();
+      if (!beats.length || view.duration <= 0) {
+        return;
+      }
+
+      const labelEvery = Number(labelEveryEl.value);
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.textBaseline = "top";
+      beats.forEach((beat, index) => {
+        const time = Number(beat.timeSeconds);
+        if (!Number.isFinite(time) || time < view.start || time > view.end) {
+          return;
+        }
+        const x = timeToX(area, view, time);
+        const beatIndex = Number.isFinite(Number(beat.index)) ? Number(beat.index) : index;
+        const isBar = beatIndex % 4 === 0;
+        ctx.strokeStyle = isBar ? getCss("--bar") : getCss("--beat");
+        ctx.lineWidth = isBar ? 1.25 : 0.75;
+        ctx.beginPath();
+        ctx.moveTo(x, area.top);
+        ctx.lineTo(x, area.bottom);
+        ctx.stroke();
+
+        if (labelEvery > 0 && beatIndex % labelEvery === 0) {
+          ctx.fillStyle = "#2e6d55";
+          ctx.fillText(String(beatIndex), x + 3, area.top + 2);
+        }
+      });
+    }
+
+    function drawReferenceGrid(area, view) {
+      const bpm = Number(referenceBpmEl.value);
+      if (!Number.isFinite(bpm) || bpm <= 0 || view.duration <= 0) {
+        return;
+      }
+
+      const anchorFromInput = Number(referenceAnchorEl.value);
+      const firstBeat = getBeats()[0] && Number(getBeats()[0].timeSeconds);
+      const anchor = Number.isFinite(anchorFromInput)
+        ? anchorFromInput
+        : (Number.isFinite(firstBeat) ? firstBeat : 0);
+      const beatSeconds = 60 / bpm;
+      let time = anchor;
+      while (time > view.start) {
+        time -= beatSeconds;
+      }
+      while (time < view.start) {
+        time += beatSeconds;
+      }
+
+      ctx.strokeStyle = getCss("--reference");
+      ctx.lineWidth = 0.8;
+      for (; time <= view.end; time += beatSeconds) {
+        if (time < 0) {
+          continue;
+        }
+        const x = timeToX(area, view, time);
+        ctx.beginPath();
+        ctx.moveTo(x, area.top);
+        ctx.lineTo(x, area.bottom);
+        ctx.stroke();
+      }
+    }
+
+    function drawSections(area, view) {
+      const sections = getSections();
+      if (!sections.length || view.duration <= 0) {
+        return;
+      }
+
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.textBaseline = "top";
+      sections.forEach(section => {
+        const start = Number(section.startSeconds);
+        const end = Number(section.endSeconds || view.fullDuration);
+        if (!Number.isFinite(start)) {
+          return;
+        }
+        if (end < view.start || start > view.end) {
+          return;
+        }
+        const visibleStart = Math.max(start, view.start);
+        const visibleEnd = Math.min(end, view.end);
+        const x = timeToX(area, view, visibleStart);
+        const w = Math.max(2, timeToX(area, view, visibleEnd) - x);
+        ctx.fillStyle = getCss("--section");
+        ctx.fillRect(x, area.top, w, area.height);
+        ctx.fillStyle = "#71501a";
+        ctx.fillText(`${section.type || "section"} ${formatTime(start, 2)}`, x + 5, area.bottom - 22);
+      });
+    }
+
+    function drawCues(area, view) {
+      const cues = getCues();
+      if (!cues.length || view.duration <= 0) {
+        return;
+      }
+
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.textBaseline = "top";
+      cues.forEach((cue, index) => {
+        const time = Number(cue.timeSeconds);
+        if (!Number.isFinite(time)) {
+          return;
+        }
+        if (time < view.start || time > view.end) {
+          return;
+        }
+        const x = timeToX(area, view, time);
+        ctx.strokeStyle = getCss("--cue");
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, area.top);
+        ctx.lineTo(x, area.bottom);
+        ctx.stroke();
+        ctx.fillStyle = getCss("--cue");
+        const label = `${cue.type || "cue"} ${formatTime(time, 3)}`;
+        ctx.fillText(label, x + 5, area.top + 18 + (index % 5) * 16);
+      });
+    }
+
+    function drawHover(area, view) {
+      if (!Number.isFinite(state.hoverTime) || view.duration <= 0) {
+        return;
+      }
+
+      const x = timeToX(area, view, state.hoverTime);
+      ctx.strokeStyle = "#201f1b";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, area.top);
+      ctx.lineTo(x, area.bottom);
+      ctx.stroke();
+
+      const label = formatTime(state.hoverTime, 3);
+      ctx.font = "12px system-ui, sans-serif";
+      const width = ctx.measureText(label).width + 12;
+      const boxX = clamp(x + 8, area.left, area.right - width);
+      ctx.fillStyle = "#201f1b";
+      ctx.fillRect(boxX, area.top + 4, width, 22);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(label, boxX + 6, area.top + 9);
+    }
+
+    function drawPlaybackCursor(area, view) {
+      if (!hasAudio() || view.duration <= 0) {
+        return;
+      }
+
+      const time = Number(audio.currentTime);
+      if (!Number.isFinite(time) || time < view.start || time > view.end) {
+        return;
+      }
+
+      const x = timeToX(area, view, time);
+      ctx.strokeStyle = getCss("--playhead");
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, area.top);
+      ctx.lineTo(x, area.bottom);
+      ctx.stroke();
+
+      const label = audio.paused ? formatTime(time, 3) : `play ${formatTime(time, 3)}`;
+      ctx.font = "12px system-ui, sans-serif";
+      const width = ctx.measureText(label).width + 12;
+      const boxX = clamp(x + 8, area.left, area.right - width);
+      ctx.fillStyle = getCss("--playhead");
+      ctx.fillRect(boxX, area.bottom - 26, width, 22);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(label, boxX + 6, area.bottom - 21);
+    }
+
+    function drawAxisLabels(area, view) {
+      if (view.duration <= 0) {
+        return;
+      }
+
+      ctx.fillStyle = "#68645b";
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.textBaseline = "top";
+      const tickStep = chooseTickStep(view.duration);
+      const firstTick = Math.ceil(view.start / tickStep) * tickStep;
+      const decimals = tickStep < 1 ? 3 : 2;
+      for (let time = firstTick; time <= view.end + 0.001; time += tickStep) {
+        const x = timeToX(area, view, time);
+        ctx.fillText(formatTime(time, decimals), x + 3, area.bottom + 8);
+      }
+    }
+
+    function drawOverviewCanvas(width, height) {
+      const fullDuration = getDuration();
+      const view = getView(fullDuration);
+      const area = overviewPlotArea(width, height);
+
+      overviewCtx.clearRect(0, 0, width, height);
+      overviewCtx.fillStyle = "#ffffff";
+      overviewCtx.fillRect(0, 0, width, height);
+
+      if (!state.analysis && !state.waveform) {
+        overviewCtx.fillStyle = "#68645b";
+        overviewCtx.font = "12px system-ui, sans-serif";
+        overviewCtx.fillText("Full-song overview", area.left, area.top + 16);
+        return;
+      }
+
+      drawOverviewSections(area, fullDuration);
+      drawOverviewWaveform(area, fullDuration);
+      drawOverviewCues(area, fullDuration);
+      drawOverviewSelection(area, view);
+      drawOverviewPlaybackCursor(area, fullDuration);
+      drawOverviewAxis(area, fullDuration);
+    }
+
+    function overviewPlotArea(width, height) {
+      const left = 58;
+      const rightPad = 22;
+      const top = 14;
+      const bottomPad = 24;
+      return {
+        left,
+        top,
+        right: width - rightPad,
+        bottom: height - bottomPad,
+        width: Math.max(1, width - left - rightPad),
+        height: Math.max(1, height - top - bottomPad),
+      };
+    }
+
+    function overviewTimeToX(area, fullDuration, time) {
+      return area.left + (Number(time) / Math.max(fullDuration, 0.001)) * area.width;
+    }
+
+    function overviewWaveformPointPixelWidth(area, fullDuration, points, index) {
+      const startX = overviewTimeToX(area, fullDuration, waveformPointStart(points, index));
+      const endX = overviewTimeToX(area, fullDuration, waveformPointEnd(points, index, fullDuration));
+      return Math.max(1, Math.abs(endX - startX));
+    }
+
+    function drawOverviewWaveform(area, fullDuration) {
+      const points = state.waveform && Array.isArray(state.waveform.points) ? state.waveform.points : [];
+      if (!points.length || fullDuration <= 0) {
+        return;
+      }
+
+      const peak = Math.max(0.001, Number(state.waveform.summary && state.waveform.summary.peak) || 1);
+      const mid = area.top + area.height * 0.50;
+      const amp = area.height * 0.38;
+
+      if (hasRgbWaveformPoints(points)) {
+        overviewCtx.save();
+        overviewCtx.lineCap = "butt";
+        points.forEach((point, index) => {
+          const x = overviewTimeToX(area, fullDuration, waveformPointCenter(points, index, fullDuration));
+          const width = overviewWaveformPointPixelWidth(area, fullDuration, points, index);
+          const yMax = mid - clamp(Number(point.max) / peak, -1, 1) * amp;
+          const yMin = mid - clamp(Number(point.min) / peak, -1, 1) * amp;
+          overviewCtx.strokeStyle = rgbWaveColor(point);
+          overviewCtx.lineWidth = width;
+          overviewCtx.beginPath();
+          overviewCtx.moveTo(x, yMax);
+          overviewCtx.lineTo(x, yMin);
+          overviewCtx.stroke();
+        });
+        overviewCtx.restore();
+        return;
+      }
+
+      overviewCtx.beginPath();
+      points.forEach((point, index) => {
+        const x = overviewTimeToX(area, fullDuration, waveformPointCenter(points, index, fullDuration));
+        const y = mid - clamp(Number(point.max) / peak, -1, 1) * amp;
+        if (index === 0) {
+          overviewCtx.moveTo(x, y);
+        } else {
+          overviewCtx.lineTo(x, y);
+        }
+      });
+      for (let index = points.length - 1; index >= 0; index -= 1) {
+        const point = points[index];
+        const x = overviewTimeToX(area, fullDuration, waveformPointCenter(points, index, fullDuration));
+        const y = mid - clamp(Number(point.min) / peak, -1, 1) * amp;
+        overviewCtx.lineTo(x, y);
+      }
+      overviewCtx.closePath();
+      overviewCtx.fillStyle = getCss("--wave-fill");
+      overviewCtx.fill();
+      overviewCtx.strokeStyle = getCss("--wave");
+      overviewCtx.lineWidth = 1;
+      overviewCtx.stroke();
+    }
+
+    function drawOverviewSections(area, fullDuration) {
+      if (fullDuration <= 0) {
+        return;
+      }
+
+      for (const section of getSections()) {
+        const start = Number(section.startSeconds);
+        const end = Number(section.endSeconds || fullDuration);
+        if (!Number.isFinite(start)) {
+          continue;
+        }
+        const x = overviewTimeToX(area, fullDuration, Math.max(0, start));
+        const w = Math.max(2, overviewTimeToX(area, fullDuration, Math.min(end, fullDuration)) - x);
+        overviewCtx.fillStyle = getCss("--section");
+        overviewCtx.fillRect(x, area.top, w, area.height);
+      }
+    }
+
+    function drawOverviewCues(area, fullDuration) {
+      if (fullDuration <= 0) {
+        return;
+      }
+
+      overviewCtx.strokeStyle = getCss("--cue");
+      overviewCtx.lineWidth = 1.5;
+      for (const cue of getCues()) {
+        const time = Number(cue.timeSeconds);
+        if (!Number.isFinite(time)) {
+          continue;
+        }
+        const x = overviewTimeToX(area, fullDuration, time);
+        overviewCtx.beginPath();
+        overviewCtx.moveTo(x, area.top);
+        overviewCtx.lineTo(x, area.bottom);
+        overviewCtx.stroke();
+      }
+    }
+
+    function drawOverviewSelection(area, view) {
+      if (!view.fullDuration) {
+        return;
+      }
+
+      const x = overviewTimeToX(area, view.fullDuration, view.start);
+      const w = Math.max(2, overviewTimeToX(area, view.fullDuration, view.end) - x);
+      overviewCtx.fillStyle = getCss("--selection");
+      overviewCtx.fillRect(x, area.top, w, area.height);
+      overviewCtx.strokeStyle = getCss("--focus");
+      overviewCtx.lineWidth = 2;
+      overviewCtx.strokeRect(x, area.top, w, area.height);
+    }
+
+    function drawOverviewPlaybackCursor(area, fullDuration) {
+      if (!hasAudio() || fullDuration <= 0) {
+        return;
+      }
+
+      const time = Number(audio.currentTime);
+      if (!Number.isFinite(time)) {
+        return;
+      }
+      const x = overviewTimeToX(area, fullDuration, time);
+      overviewCtx.strokeStyle = getCss("--playhead");
+      overviewCtx.lineWidth = 2;
+      overviewCtx.beginPath();
+      overviewCtx.moveTo(x, area.top);
+      overviewCtx.lineTo(x, area.bottom);
+      overviewCtx.stroke();
+    }
+
+    function drawOverviewAxis(area, fullDuration) {
+      if (fullDuration <= 0) {
+        return;
+      }
+
+      overviewCtx.fillStyle = "#68645b";
+      overviewCtx.font = "11px system-ui, sans-serif";
+      overviewCtx.textBaseline = "top";
+      const tickStep = chooseTickStep(fullDuration);
+      for (let time = 0; time <= fullDuration + 0.001; time += tickStep) {
+        const x = overviewTimeToX(area, fullDuration, time);
+        overviewCtx.fillText(formatTime(time, 0), x + 3, area.bottom + 6);
+      }
+    }
+
+    function drawSummary() {
+      const analysis = state.analysis || {};
+      const tempo = analysis.tempo || {};
+      const beatGrid = analysis.beatGrid || {};
+      const waveform = state.waveform || {};
+      const view = getView(getDuration());
+      const waveMode = waveform.artifactType === "debug-waveform" ? "RGB debug" : "Peak/RMS";
+      const waveformOffset = getWaveformTimelineOffsetSeconds();
+      const metrics = [
+        ["Track", analysis.trackId || waveform.trackId || "-"],
+        ["BPM", formatNumber(tempo.bpm, 3)],
+        ["Normalized", formatNumber(tempo.normalizedBpm, 3)],
+        ["Tempo conf", formatNumber(tempo.confidence, 3)],
+        ["Beat conf", formatNumber(beatGrid.confidence, 3)],
+        ["Duration", getDuration() ? formatTime(getDuration()) : "-"],
+        ["Window", view.duration ? `${formatTime(view.start, 3)} to ${formatTime(view.end, 3)}` : "-"],
+        ["Beats", String(getBeats().length || "-")],
+        ["Cues", String(getCues().length || "-")],
+        ["Sections", String(getSections().length || "-")],
+        ["Wave points", String((waveform.points && waveform.points.length) || "-")],
+        ["Wave mode", waveMode],
+        ["Wave offset", waveformOffset ? `${(waveformOffset * 1000).toFixed(3)} ms` : "-"],
+        ["Playhead", hasAudio() ? formatTime(audio.currentTime, 3) : "-"],
+        ["Audio", state.loadNames.audio || "-"],
+        ["Peak", formatNumber(waveform.summary && waveform.summary.peak, 4)],
+        ["RMS", formatNumber(waveform.summary && waveform.summary.rms, 4)],
+      ];
+
+      summaryEl.innerHTML = metrics.map(([name, value]) => (
+        `<article class="metric"><div class="name">${escapeHtml(name)}</div><div class="value">${escapeHtml(value)}</div></article>`
+      )).join("");
+    }
+
+    function drawTables() {
+      cueTableEl.innerHTML = tableHtml(
+        getCues(),
+        ["type", "timeSeconds", "beatIndex", "confidence", "tags"],
+        row => ({
+          type: row.type || "",
+          timeSeconds: formatNumber(row.timeSeconds, 3),
+          beatIndex: row.beatIndex == null ? "" : String(row.beatIndex),
+          confidence: formatNumber(row.confidence, 3),
+          tags: Array.isArray(row.tags) ? row.tags.join(", ") : "",
+        }),
+        "No cue points loaded."
+      );
+
+      sectionTableEl.innerHTML = tableHtml(
+        getSections(),
+        ["type", "startSeconds", "endSeconds", "confidence", "energyMean"],
+        row => ({
+          type: row.type || "",
+          startSeconds: formatNumber(row.startSeconds, 3),
+          endSeconds: formatNumber(row.endSeconds, 3),
+          confidence: formatNumber(row.confidence, 3),
+          energyMean: formatNumber(row.energyMean, 3),
+        }),
+        "No sections loaded."
+      );
+    }
+
+    function tableHtml(rows, columns, mapper, emptyText) {
+      if (!rows.length) {
+        return `<div class="empty">${escapeHtml(emptyText)}</div>`;
+      }
+      const header = columns.map(column => `<th>${escapeHtml(column)}</th>`).join("");
+      const body = rows.map(row => {
+        const mapped = mapper(row);
+        return `<tr>${columns.map(column => `<td>${escapeHtml(mapped[column] || "")}</td>`).join("")}</tr>`;
+      }).join("");
+      return `<table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    function getBeats() {
+      const beats = state.analysis && state.analysis.beatGrid && state.analysis.beatGrid.beats;
+      return Array.isArray(beats) ? beats : [];
+    }
+
+    function getCues() {
+      return Array.isArray(state.analysis && state.analysis.cuePoints) ? state.analysis.cuePoints : [];
+    }
+
+    function getSections() {
+      return Array.isArray(state.analysis && state.analysis.sections) ? state.analysis.sections : [];
+    }
+
+    function chooseTickStep(duration) {
+      if (duration <= 0.75) {
+        return 0.05;
+      }
+      if (duration <= 1.5) {
+        return 0.1;
+      }
+      if (duration <= 3) {
+        return 0.25;
+      }
+      if (duration <= 8) {
+        return 0.5;
+      }
+      if (duration <= 20) {
+        return 1;
+      }
+      if (duration <= 45) {
+        return 5;
+      }
+      if (duration <= 90) {
+        return 10;
+      }
+      if (duration <= 240) {
+        return 30;
+      }
+      if (duration <= 600) {
+        return 60;
+      }
+      return 120;
+    }
+
+    function formatTime(seconds, decimals = 2) {
+      const value = Number(seconds);
+      if (!Number.isFinite(value)) {
+        return "-";
+      }
+      const minutes = Math.floor(value / 60);
+      const secs = value - minutes * 60;
+      const wholeWidth = decimals > 0 ? 3 + decimals : 2;
+      return `${minutes}:${secs.toFixed(decimals).padStart(wholeWidth, "0")}`;
+    }
+
+    function formatNumber(value, digits) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number.toFixed(digits) : "-";
+    }
+
+    function clamp(value, min, max) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        return min;
+      }
+      return Math.min(max, Math.max(min, number));
+    }
+
+    function getCss(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    render();
+  </script>
+</body>
+</html>

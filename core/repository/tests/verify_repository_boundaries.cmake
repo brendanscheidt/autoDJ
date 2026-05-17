@@ -41,7 +41,7 @@ file(GLOB_RECURSE project_files
 set(artifact_failures "")
 foreach(path IN LISTS project_files)
     file(TO_CMAKE_PATH "${path}" normalized_path)
-    if(normalized_path MATCHES "/(build|\\.git|\\.venv|__pycache__)/")
+    if(normalized_path MATCHES "/(build|\\.git|\\.venv|\\.venv-analysis|__pycache__)/")
         continue()
     endif()
 
