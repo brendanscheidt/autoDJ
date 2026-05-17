@@ -1,10 +1,21 @@
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 
 import pytest
 
-from autodj_analysis import analyzed_track_path
+from audio_fixtures import create_energy_ramp_fixture
+from autodj_analysis import (
+    ANALYZER_PRODUCER,
+    ANALYZER_VERSION,
+    EnergyFeatures,
+    SignalAnalysisResult,
+    StructureFeatures,
+    TempoFeatures,
+    analyzed_track_path,
+    waveform_path,
+)
 from autodj_analysis.cli import main
 
 
@@ -64,6 +75,92 @@ def _runner(payload: dict, seen_commands: list[list[str]] | None = None):
     return run
 
 
+def _skip_without_debug_dependencies() -> None:
+    missing = [
+        module
+        for module in ["numpy", "scipy", "soundfile"]
+        if importlib.util.find_spec(module) is None
+    ]
+    if missing:
+        pytest.skip(
+            "debug waveform dependencies are not installed; missing "
+            + ", ".join(missing)
+            + ". Install the worker with `[analysis]`."
+        )
+
+
+def _signal_analyzer():
+    def analyze(track, identity, created_at_utc):
+        return SignalAnalysisResult(
+            waveform_artifact={
+                "schemaVersion": "1.0.0",
+                "trackId": track.track_id,
+                "analyzer": {
+                    "producer": ANALYZER_PRODUCER,
+                    "producerVersion": ANALYZER_VERSION,
+                    "createdAtUtc": created_at_utc,
+                    "sourceContentHash": identity.source_content_hash or "",
+                    "parametersHash": identity.parameters_hash or "",
+                },
+                "durationSeconds": 12.5,
+                "sampleRate": 22050,
+                "parameters": {"targetPointCount": 1, "mode": "peak-rms"},
+                "summary": {"peak": 0.8, "rms": 0.4},
+                "points": [{"timeSeconds": 0.0, "min": -0.8, "max": 0.8, "rms": 0.4}],
+            },
+            energy_features=EnergyFeatures(
+                global_energy=0.42,
+                curve=({"timeSeconds": 0.0, "value": 0.42},),
+                bass_energy_curve=({"timeSeconds": 0.0, "value": 0.35},),
+                onset_density_curve=({"timeSeconds": 0.0, "value": 0.25},),
+                warnings=(),
+                frame_length=2048,
+                hop_length=512,
+                curve_point_count=512,
+                bass_cutoff_hz=180.0,
+            ),
+            tempo_features=TempoFeatures(
+                bpm=140.0,
+                normalized_bpm=140.0,
+                confidence=0.76,
+                tempo_class="straight",
+                candidates=({"bpm": 140.0, "confidence": 0.76, "backend": "test"},),
+                beats=({"index": 0, "timeSeconds": 0.0, "confidence": 0.72},),
+                downbeats=(),
+                beat_grid_confidence=0.72,
+                warnings=("Downbeats were not emitted.",),
+                backend="test",
+                hop_length=512,
+            ),
+            structure_features=StructureFeatures(
+                sections=(
+                    {
+                        "id": "section-drop-001",
+                        "type": "drop",
+                        "startSeconds": 0.0,
+                        "endSeconds": 12.5,
+                        "confidence": 0.68,
+                    },
+                ),
+                cue_points=(
+                    {
+                        "id": "cue-drop-001",
+                        "type": "drop",
+                        "timeSeconds": 0.0,
+                        "sectionId": "section-drop-001",
+                        "confidence": 0.68,
+                    },
+                ),
+                warnings=(),
+                backend="test",
+                high_energy_threshold=0.65,
+                low_energy_threshold=0.35,
+            ),
+        )
+
+    return analyze
+
+
 def _write_manifest(tmp_path: Path, tracks: list[dict]) -> Path:
     music_root = tmp_path / "music"
     music_root.mkdir(exist_ok=True)
@@ -119,6 +216,50 @@ def test_cli_analyze_batch_help_lists_expected_options(capsys) -> None:
     assert "--json" in captured.out
 
 
+def test_cli_debug_waveform_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["debug-waveform", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "audio_path" in captured.out
+    assert "--points" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--low-cutoff-hz" in captured.out
+    assert "--high-cutoff-hz" in captured.out
+
+
+@pytest.mark.analysis
+def test_cli_debug_waveform_writes_rgb_artifact(tmp_path, capsys) -> None:
+    _skip_without_debug_dependencies()
+    fixture = create_energy_ramp_fixture(tmp_path, duration_seconds=1.0)
+    output_path = tmp_path / "debug-waveform.json"
+
+    exit_code = main(
+        [
+            "debug-waveform",
+            str(fixture.path),
+            "--out",
+            str(output_path),
+            "--points",
+            "32",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["artifact"] == "debug-waveform"
+    assert payload["points"] == 32
+    assert artifact["artifactType"] == "debug-waveform"
+    assert artifact["points"][0]["low"] >= 0.0
+
+
 def test_cli_analyze_batch_json_summary_output(tmp_path, capsys) -> None:
     manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
     cache_root = tmp_path / ".autodj-cache"
@@ -137,6 +278,7 @@ def test_cli_analyze_batch_json_summary_output(tmp_path, capsys) -> None:
             "--json",
         ],
         probe_runner=_runner(_ffprobe_payload(), seen_commands),
+        signal_analyzer=_signal_analyzer(),
     )
 
     captured = capsys.readouterr()
@@ -150,8 +292,10 @@ def test_cli_analyze_batch_json_summary_output(tmp_path, capsys) -> None:
     assert payload["analyzed"] == 1
     assert payload["tracks"][0]["status"] == "analyzed"
     assert payload["tracks"][0]["artifactPath"] == str(analyzed_track_path(cache_root, "track-a"))
+    assert payload["tracks"][0]["waveformPath"] == str(waveform_path(cache_root, "track-a"))
     assert seen_commands[0][0] == "fake-ffprobe"
     assert artifact["analyzer"]["parametersHash"] == "sha256:cli-params"
+    assert waveform_path(cache_root, "track-a").exists()
 
 
 def test_cli_analyze_batch_successful_human_output(tmp_path, capsys) -> None:
@@ -161,6 +305,7 @@ def test_cli_analyze_batch_successful_human_output(tmp_path, capsys) -> None:
     exit_code = main(
         ["analyze-batch", str(manifest_path), "--out", str(cache_root)],
         probe_runner=_runner(_ffprobe_payload()),
+        signal_analyzer=_signal_analyzer(),
     )
 
     captured = capsys.readouterr()
@@ -170,6 +315,7 @@ def test_cli_analyze_batch_successful_human_output(tmp_path, capsys) -> None:
     assert "- track-a: analyzed" in captured.out
     assert captured.err == ""
     assert analyzed_track_path(cache_root, "track-a").exists()
+    assert waveform_path(cache_root, "track-a").exists()
 
 
 def test_cli_analyze_batch_manifest_failure_is_actionable(tmp_path, capsys) -> None:
@@ -197,6 +343,7 @@ def test_cli_analyze_batch_partial_failure_returns_nonzero_after_summary(tmp_pat
     exit_code = main(
         ["analyze-batch", str(manifest_path), "--out", str(cache_root), "--json"],
         probe_runner=_runner(_ffprobe_payload()),
+        signal_analyzer=_signal_analyzer(),
     )
 
     captured = capsys.readouterr()

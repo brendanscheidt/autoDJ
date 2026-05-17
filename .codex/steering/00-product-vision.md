@@ -34,6 +34,13 @@ The desktop app should still be built with a mobile-aware core. The playback
 engine, data contracts, and DJ strategy interfaces should avoid assumptions that
 would block future iOS/Android reuse.
 
+The long-term mobile product must be able to import local audio from device
+storage, analyze it on device, generate an AutoDJ plan, and play it without
+requiring pre-analyzed desktop artifacts or a cloud analysis service. Desktop
+and Python tooling may accelerate the proof of concept, but the core contracts
+and eventual production algorithms should not depend on a server-only or
+WSL-only runtime.
+
 ## MVP Scope
 
 The MVP imports local WAV/MP3 files and assumes they are dubstep or adjacent bass
@@ -69,6 +76,11 @@ technical capabilities and platform policies allow the required behavior.
 
 - Users provide local audio files they are allowed to process.
 - Analysis can happen before playback and can take time.
+- The proof-of-concept analyzer may use heavy Python libraries to find the best
+  algorithms and feature combinations quickly.
+- The production mobile analyzer will eventually need native/mobile-portable
+  implementations or licensed native libraries for the subset of analysis that
+  must run offline on device.
 - The app may create derived assets such as waveform previews, metadata JSON,
   and stem files.
 - The first DJ strategy optimizes for dubstep-style arrangement conventions:
@@ -88,4 +100,3 @@ A successful MVP can:
 - Avoid obvious vocal clashes and phrase trainwrecks.
 - Expose enough metadata to debug why a transition was chosen.
 - Let a developer replay the same set deterministically from the same inputs.
-

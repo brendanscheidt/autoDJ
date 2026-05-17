@@ -1,4 +1,4 @@
-"""Metadata cache helpers for analyzed-track artifacts."""
+"""Metadata cache helpers for analysis artifacts."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from uuid import uuid4
 
 
 ANALYZED_TRACK_FILENAME = "analyzed-track.json"
+WAVEFORM_FILENAME = "waveform.json"
 SCHEMA_VERSION = "1.0.0"
 
 
@@ -74,6 +75,12 @@ def analyzed_track_path(cache_root: str | Path, track_id: str) -> Path:
     return track_cache_dir(cache_root, track_id) / ANALYZED_TRACK_FILENAME
 
 
+def waveform_path(cache_root: str | Path, track_id: str) -> Path:
+    """Return `<cache-root>/tracks/<track-id>/waveform.json`."""
+
+    return track_cache_dir(cache_root, track_id) / WAVEFORM_FILENAME
+
+
 def write_json_atomic(destination: str | Path, payload: Mapping[str, Any]) -> Path:
     """Write JSON to a destination path using a same-directory temp file."""
 
@@ -91,7 +98,7 @@ def write_json_atomic(destination: str | Path, payload: Mapping[str, Any]) -> Pa
             _remove_temporary_file(temporary_path)
         raise CacheError(
             "artifact_write_error",
-            f"Could not write analyzed artifact: {exc}",
+            f"Could not write JSON artifact: {exc}",
             str(destination_path),
         ) from exc
     return destination_path
@@ -100,13 +107,25 @@ def write_json_atomic(destination: str | Path, payload: Mapping[str, Any]) -> Pa
 def load_analyzed_artifact(path: str | Path) -> LoadedArtifact:
     """Load an existing artifact without throwing for expected cache states."""
 
+    return load_json_artifact(path, artifact_name="Analyzed artifact")
+
+
+def load_waveform_artifact(path: str | Path) -> LoadedArtifact:
+    """Load an existing waveform artifact without throwing for expected cache states."""
+
+    return load_json_artifact(path, artifact_name="Waveform artifact")
+
+
+def load_json_artifact(path: str | Path, *, artifact_name: str = "Artifact") -> LoadedArtifact:
+    """Load an existing JSON artifact without throwing for expected cache states."""
+
     artifact_path = Path(path)
     if not artifact_path.exists():
         return LoadedArtifact(
             path=artifact_path,
             artifact=None,
             error_code="artifact_missing",
-            message="Analyzed artifact does not exist",
+            message=f"{artifact_name} does not exist",
         )
 
     try:
@@ -116,14 +135,14 @@ def load_analyzed_artifact(path: str | Path) -> LoadedArtifact:
             path=artifact_path,
             artifact=None,
             error_code="artifact_read_error",
-            message=f"Could not read analyzed artifact: {exc}",
+            message=f"Could not read {artifact_name.lower()}: {exc}",
         )
     except json.JSONDecodeError as exc:
         return LoadedArtifact(
             path=artifact_path,
             artifact=None,
             error_code="artifact_malformed_json",
-            message=f"Could not parse analyzed artifact JSON: {exc.msg}",
+            message=f"Could not parse {artifact_name.lower()} JSON: {exc.msg}",
         )
 
     if not isinstance(payload, dict):
@@ -131,7 +150,7 @@ def load_analyzed_artifact(path: str | Path) -> LoadedArtifact:
             path=artifact_path,
             artifact=None,
             error_code="artifact_malformed_json",
-            message="Analyzed artifact root must be a JSON object",
+            message=f"{artifact_name} root must be a JSON object",
         )
 
     return LoadedArtifact(path=artifact_path, artifact=payload)
@@ -215,6 +234,30 @@ def check_artifact_freshness(
     return FreshnessDecision(True, "fresh", "Analyzed artifact is current")
 
 
+def check_analysis_artifact_freshness(
+    analyzed: LoadedArtifact,
+    waveform: LoadedArtifact,
+    expected: ArtifactIdentity,
+    *,
+    force: bool = False,
+) -> FreshnessDecision:
+    """Require both analyzed-track and waveform artifacts to be current."""
+
+    analyzed_decision = check_artifact_freshness(analyzed, expected, force=force)
+    if not analyzed_decision.is_fresh:
+        return analyzed_decision
+
+    waveform_decision = check_artifact_freshness(waveform, expected)
+    if not waveform_decision.is_fresh:
+        return FreshnessDecision(
+            False,
+            _waveform_reason(waveform_decision.reason),
+            f"Waveform artifact is not current: {waveform_decision.message}",
+        )
+
+    return FreshnessDecision(True, "fresh", "Analyzed and waveform artifacts are current")
+
+
 def _safe_track_id(track_id: str) -> str:
     if not track_id or track_id in {".", ".."}:
         raise CacheError("artifact_path_error", "Track ID must be a non-empty cache path segment")
@@ -228,3 +271,11 @@ def _remove_temporary_file(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _waveform_reason(reason: str) -> str:
+    if reason.startswith("waveform_"):
+        return reason
+    if reason.startswith("artifact_"):
+        return f"waveform_{reason}"
+    return f"waveform_{reason}"
