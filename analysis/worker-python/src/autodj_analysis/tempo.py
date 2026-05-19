@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Sequence
 
 from .audio_io import DecodedAudio
 from .dependencies import OptionalDependencyUnavailable, require_optional_dependency
@@ -27,6 +27,16 @@ ELECTRONIC_GRID_REFINEMENT_ONSET_TOLERANCE_SECONDS = 0.050
 ELECTRONIC_GRID_STRONG_ONSET_QUANTILE = 0.55
 ELECTRONIC_GRID_ZERO_WRAP_TOLERANCE_SECONDS = 0.060
 MIN_ELECTRONIC_GRID_SCORE = 0.070
+DUBSTEP_FINAL_BPM_QUANTIZATION = 0.5
+DUBSTEP_TEMPO_CONSENSUS_TOLERANCE_BPM = 1.0
+DUBSTEP_TEMPO_CONSENSUS_BACKEND_BONUS = 0.22
+DUBSTEP_TEMPO_ELECTRONIC_PRIORITY_BONUS = 0.10
+DUBSTEP_TEMPO_CONSENSUS_OVERRIDE_MARGIN = 0.08
+FINAL_GRID_PHASE_STEP_SECONDS = 0.001
+FINAL_GRID_PHASE_COARSE_STEP_SECONDS = 0.004
+FINAL_GRID_PHASE_FINE_WINDOW_SECONDS = 0.030
+FINAL_GRID_PHASE_HOP_LENGTH = 128
+FINAL_GRID_PHASE_STRONG_ONSET_QUANTILE = 0.60
 
 
 class TempoExtractionError(ValueError):
@@ -110,6 +120,14 @@ def normalize_dubstep_bpm(bpm: float) -> NormalizedTempo:
             tempo_class="straight",
             confidence_multiplier=0.85,
             warning="Tempo is outside the preferred dubstep 70/140 range; normalization confidence is reduced.",
+        )
+    if 190.0 < bpm <= 220.0:
+        return NormalizedTempo(
+            bpm=_round_float(bpm),
+            normalized_bpm=_round_float(bpm / 2.0),
+            tempo_class="doubletime",
+            confidence_multiplier=0.95,
+            warning="Tempo is in a double-time dubstep range; using half-time BPM for the beat grid.",
         )
 
     normalized = _closest_dubstep_related_bpm(bpm)
@@ -216,7 +234,7 @@ def compute_tempo_features(
             warning="Tempo and beat grid are low confidence because no plausible tempo candidates were found.",
         )
 
-    best = max(candidates, key=lambda candidate: candidate.confidence)
+    best = _select_dubstep_tempo_candidate(candidates)
     normalized = normalize_dubstep_bpm(best.bpm)
     warnings: list[str] = []
     if normalized.warning is not None:
@@ -233,6 +251,7 @@ def compute_tempo_features(
         duration_seconds=decoded_audio.duration_seconds,
         confidence=beat_grid_confidence,
         start_transient=start_transient,
+        librosa=librosa,
         grid_bpm=normalized.normalized_bpm,
     )
 
@@ -299,6 +318,145 @@ def _validate_tempo_parameters(
             "tempo_invalid_parameters",
             "Tempo range must be positive and max_tempo_bpm must exceed min_tempo_bpm",
         )
+
+
+@dataclass(frozen=True)
+class _TempoCandidateGroup:
+    normalized_bpm: float
+    candidates: tuple[_TempoCandidate, ...]
+    score: float
+
+
+def _select_dubstep_tempo_candidate(candidates: tuple[_TempoCandidate, ...]) -> _TempoCandidate:
+    """Pick a conservative dubstep BPM while letting consensus catch edge cases."""
+
+    electronic = next((candidate for candidate in candidates if candidate.name == "electronic_quantized_grid"), None)
+    groups = _tempo_candidate_groups(candidates)
+    if not groups:
+        return _quantized_tempo_candidate(max(candidates, key=lambda candidate: candidate.confidence))
+
+    best_group = max(groups, key=lambda group: group.score)
+    electronic_group = (
+        _group_for_candidate(electronic, groups)
+        if electronic is not None
+        else None
+    )
+
+    if electronic is not None and electronic.confidence >= 0.86 and electronic_group is not None:
+        competing_groups = [group for group in groups if group is not electronic_group]
+        best_competing = max(competing_groups, key=lambda group: group.score) if competing_groups else None
+        if best_competing is None:
+            best_group = electronic_group
+        else:
+            distance = abs(best_competing.normalized_bpm - electronic_group.normalized_bpm)
+            has_independent_consensus = _independent_backend_count(best_competing.candidates) >= 2
+            if (
+                distance <= 4.0
+                or not has_independent_consensus
+                or best_competing.score < electronic_group.score + DUBSTEP_TEMPO_CONSENSUS_OVERRIDE_MARGIN
+            ):
+                best_group = electronic_group
+            else:
+                best_group = best_competing
+
+    source = _preferred_candidate_for_group(best_group)
+    return _quantized_tempo_candidate(source)
+
+
+def _tempo_candidate_groups(candidates: tuple[_TempoCandidate, ...]) -> tuple[_TempoCandidateGroup, ...]:
+    groups: list[list[_TempoCandidate]] = []
+    group_bpms: list[float] = []
+    for candidate in sorted(candidates, key=lambda item: _candidate_normalized_bpm(item.bpm)):
+        normalized_bpm = _candidate_normalized_bpm(candidate.bpm)
+        for index, group_bpm in enumerate(group_bpms):
+            if abs(normalized_bpm - group_bpm) <= DUBSTEP_TEMPO_CONSENSUS_TOLERANCE_BPM:
+                groups[index].append(candidate)
+                group_bpms[index] = _group_normalized_bpm(groups[index])
+                break
+        else:
+            groups.append([candidate])
+            group_bpms.append(normalized_bpm)
+
+    return tuple(
+        _TempoCandidateGroup(
+            normalized_bpm=_round_float(group_bpms[index]),
+            candidates=tuple(group),
+            score=_tempo_group_score(group),
+        )
+        for index, group in enumerate(groups)
+    )
+
+
+def _group_for_candidate(
+    candidate: _TempoCandidate | None,
+    groups: tuple[_TempoCandidateGroup, ...],
+) -> _TempoCandidateGroup | None:
+    if candidate is None:
+        return None
+    for group in groups:
+        if candidate in group.candidates:
+            return group
+    return None
+
+
+def _group_normalized_bpm(candidates: list[_TempoCandidate]) -> float:
+    values = [_candidate_normalized_bpm(candidate.bpm) for candidate in candidates]
+    return _quantize_dubstep_bpm(_median(values))
+
+
+def _tempo_group_score(candidates: list[_TempoCandidate]) -> float:
+    confidence_score = sum(candidate.confidence for candidate in candidates)
+    backend_score = _independent_backend_count(candidates) * DUBSTEP_TEMPO_CONSENSUS_BACKEND_BONUS
+    electronic_bonus = (
+        DUBSTEP_TEMPO_ELECTRONIC_PRIORITY_BONUS
+        if any(candidate.name == "electronic_quantized_grid" for candidate in candidates)
+        else 0.0
+    )
+    return confidence_score + backend_score + electronic_bonus
+
+
+def _independent_backend_count(candidates: Sequence[_TempoCandidate]) -> int:
+    return len({candidate.name for candidate in candidates})
+
+
+def _preferred_candidate_for_group(group: _TempoCandidateGroup) -> _TempoCandidate:
+    doubletime_candidates = [
+        candidate
+        for candidate in group.candidates
+        if _quantize_dubstep_bpm(candidate.bpm) > 190.0
+    ]
+    if doubletime_candidates and 95.0 <= group.normalized_bpm <= 130.0:
+        return max(doubletime_candidates, key=lambda candidate: candidate.confidence)
+    return max(
+        group.candidates,
+        key=lambda candidate: (
+            candidate.confidence,
+            candidate.name == "electronic_quantized_grid",
+            len(candidate.beat_times),
+        ),
+    )
+
+
+def _candidate_normalized_bpm(bpm: float) -> float:
+    quantized = _quantize_dubstep_bpm(bpm)
+    normalized = normalize_dubstep_bpm(quantized)
+    return _quantize_dubstep_bpm(normalized.normalized_bpm)
+
+
+def _quantized_tempo_candidate(candidate: _TempoCandidate) -> _TempoCandidate:
+    return _TempoCandidate(
+        name=candidate.name,
+        bpm=_quantize_dubstep_bpm(candidate.bpm),
+        confidence=candidate.confidence,
+        beat_times=candidate.beat_times,
+    )
+
+
+def _quantize_dubstep_bpm(bpm: float) -> float:
+    return _round_float(
+        math.floor((bpm / DUBSTEP_FINAL_BPM_QUANTIZATION) + 0.5)
+        * DUBSTEP_FINAL_BPM_QUANTIZATION
+    )
 
 
 def _librosa_beat_candidate(
@@ -733,6 +891,7 @@ def _strong_onset_times(
     numpy: Any,
     sample_rate: int,
     hop_length: int,
+    quantile: float = ELECTRONIC_GRID_STRONG_ONSET_QUANTILE,
 ) -> Any:
     if onset_frames.size == 0:
         return numpy.asarray((), dtype=numpy.float32)
@@ -740,7 +899,7 @@ def _strong_onset_times(
     clipped_frames = numpy.clip(onset_frames, 0, normalized_envelope.size - 1)
     strengths = normalized_envelope[clipped_frames]
     if strengths.size >= 8:
-        threshold = float(numpy.quantile(strengths, ELECTRONIC_GRID_STRONG_ONSET_QUANTILE))
+        threshold = float(numpy.quantile(strengths, quantile))
         strong_mask = strengths >= threshold
         if int(strong_mask.sum()) >= 4:
             onset_frames = onset_frames[strong_mask]
@@ -830,6 +989,7 @@ def _build_beat_markers(
     *,
     samples: Any,
     numpy: Any,
+    librosa: Any,
     sample_rate: int,
     duration_seconds: float,
     confidence: float,
@@ -860,6 +1020,20 @@ def _build_beat_markers(
     if anchor < 0:
         anchor = 0.0 if abs(anchor) <= zero_wrap_tolerance else anchor + period_seconds
 
+    anchor = _optimize_final_grid_phase(
+        librosa,
+        numpy=numpy,
+        samples=samples,
+        sample_rate=sample_rate,
+        anchor=anchor,
+        period_seconds=period_seconds,
+        duration_seconds=duration_seconds,
+    )
+    if anchor > period_seconds - zero_wrap_tolerance:
+        anchor -= period_seconds
+    if anchor < 0:
+        anchor = 0.0 if abs(anchor) <= zero_wrap_tolerance else anchor + period_seconds
+
     beat_count = max(0, int(math.floor((duration_seconds - anchor + 1e-9) / period_seconds)) + 1)
     return tuple(
         {
@@ -869,6 +1043,169 @@ def _build_beat_markers(
         }
         for index in range(beat_count)
         if anchor + index * period_seconds <= duration_seconds + 1e-6
+    )
+
+
+def _optimize_final_grid_phase(
+    librosa: Any,
+    *,
+    numpy: Any,
+    samples: Any,
+    sample_rate: int,
+    anchor: float,
+    period_seconds: float,
+    duration_seconds: float,
+) -> float:
+    if period_seconds <= 0 or duration_seconds <= 0:
+        return _round_float(anchor)
+    try:
+        onset_envelope = librosa.onset.onset_strength(
+            y=samples,
+            sr=sample_rate,
+            hop_length=FINAL_GRID_PHASE_HOP_LENGTH,
+        )
+        envelope = numpy.asarray(onset_envelope, dtype=numpy.float32)
+        if envelope.size < 4:
+            return _round_float(anchor)
+        envelope_min = float(envelope.min())
+        envelope_peak = float(envelope.max() - envelope_min)
+        if envelope_peak <= NEAR_SILENCE_PEAK:
+            return _round_float(anchor)
+        normalized = (envelope - envelope_min) / envelope_peak
+        local_strength = _local_maximum_3(normalized, numpy=numpy)
+        onset_frames = numpy.asarray(
+            librosa.onset.onset_detect(
+                onset_envelope=envelope,
+                sr=sample_rate,
+                hop_length=FINAL_GRID_PHASE_HOP_LENGTH,
+                units="frames",
+                backtrack=True,
+            ),
+            dtype=numpy.int64,
+        )
+    except Exception:
+        return _round_float(anchor)
+
+    onset_times = _strong_onset_times(
+        onset_frames,
+        normalized,
+        librosa=librosa,
+        numpy=numpy,
+        sample_rate=sample_rate,
+        hop_length=FINAL_GRID_PHASE_HOP_LENGTH,
+        quantile=FINAL_GRID_PHASE_STRONG_ONSET_QUANTILE,
+    )
+    if onset_times.size < 4:
+        return _round_float(anchor)
+
+    best_anchor, _best_score = _best_phase_anchor(
+        _full_period_phase_candidates(period_seconds, numpy=numpy),
+        anchor=anchor,
+        period_seconds=period_seconds,
+        duration_seconds=duration_seconds,
+        local_strength=local_strength,
+        onset_times=onset_times,
+        numpy=numpy,
+        sample_rate=sample_rate,
+    )
+    best_anchor, _best_score = _best_phase_anchor(
+        _fine_phase_candidates(best_anchor, period_seconds, numpy=numpy),
+        anchor=best_anchor,
+        period_seconds=period_seconds,
+        duration_seconds=duration_seconds,
+        local_strength=local_strength,
+        onset_times=onset_times,
+        numpy=numpy,
+        sample_rate=sample_rate,
+    )
+    return _round_float(best_anchor)
+
+
+def _full_period_phase_candidates(period_seconds: float, *, numpy: Any) -> Any:
+    return numpy.arange(
+        0.0,
+        period_seconds,
+        min(FINAL_GRID_PHASE_COARSE_STEP_SECONDS, period_seconds),
+        dtype=numpy.float32,
+    )
+
+
+def _fine_phase_candidates(anchor: float, period_seconds: float, *, numpy: Any) -> Any:
+    offsets = numpy.arange(
+        -FINAL_GRID_PHASE_FINE_WINDOW_SECONDS,
+        FINAL_GRID_PHASE_FINE_WINDOW_SECONDS + FINAL_GRID_PHASE_STEP_SECONDS / 2.0,
+        FINAL_GRID_PHASE_STEP_SECONDS,
+        dtype=numpy.float32,
+    )
+    return numpy.asarray(
+        [_wrap_anchor(float(anchor + offset), period_seconds) for offset in offsets],
+        dtype=numpy.float32,
+    )
+
+
+def _best_phase_anchor(
+    candidate_anchors: Any,
+    *,
+    anchor: float,
+    period_seconds: float,
+    duration_seconds: float,
+    local_strength: Any,
+    onset_times: Any,
+    numpy: Any,
+    sample_rate: int,
+) -> tuple[float, float]:
+    best_anchor = _wrap_anchor(anchor, period_seconds)
+    best_score = _final_phase_score(
+        best_anchor,
+        period_seconds,
+        duration_seconds,
+        local_strength,
+        onset_times,
+        numpy=numpy,
+        sample_rate=sample_rate,
+    )
+    seen: set[float] = {round(best_anchor, 6)}
+    for candidate_anchor_value in candidate_anchors:
+        candidate_anchor = _wrap_anchor(float(candidate_anchor_value), period_seconds)
+        rounded_anchor = round(candidate_anchor, 6)
+        if rounded_anchor in seen:
+            continue
+        seen.add(rounded_anchor)
+        score = _final_phase_score(
+            candidate_anchor,
+            period_seconds,
+            duration_seconds,
+            local_strength,
+            onset_times,
+            numpy=numpy,
+            sample_rate=sample_rate,
+        )
+        if score > best_score:
+            best_score = score
+            best_anchor = candidate_anchor
+    return (best_anchor, best_score)
+
+
+def _final_phase_score(
+    anchor: float,
+    period_seconds: float,
+    duration_seconds: float,
+    local_strength: Any,
+    onset_times: Any,
+    *,
+    numpy: Any,
+    sample_rate: int,
+) -> float:
+    beat_times = numpy.arange(anchor, duration_seconds + 1e-9, period_seconds, dtype=numpy.float32)
+    if beat_times.size < 4:
+        return 0.0
+    return _refinement_grid_score(
+        beat_times,
+        local_strength,
+        onset_times,
+        numpy=numpy,
+        sample_rate=sample_rate,
+        hop_length=FINAL_GRID_PHASE_HOP_LENGTH,
     )
 
 

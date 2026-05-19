@@ -10,10 +10,14 @@ Desktop app / workbench:      C++20 + JUCE
 Build system:                 CMake + CMakePresets + CTest
 Playback engine:              C++20, JUCE audio primitives, swappable DSP backends
 Time-stretch/pitch-shift:     Abstract interface; evaluate Superpowered/Rubber Band later
-Analysis POC worker:          Python 3.10/3.11
-Analysis POC libraries:       Essentia, librosa, madmom/BeatNet, aubio,
-                               MSAF, Vamp/QM plugins, audioFlux, torchaudio,
-                               pyAudioAnalysis, mir_eval, Basic Pitch as useful
+Analysis POC worker:          Python 3.11 in WSL for the full MIR stack;
+                               lightweight Windows Python for dev/test only
+Selected timing backend:      current-autodj-signal
+Selected section backend:     dubstep-phrase-hybrid
+Analysis POC libraries:       librosa/soundfile/audioread/scipy/numpy baseline;
+                               All-In-One and SongFormer for semantic evidence;
+                               Essentia, Beat This, and other MIR tools as
+                               comparison/deferred candidates
 Production mobile analysis:   Native/mobile-portable C++ or licensed native
                                libraries derived from the winning POC behavior
 Stem separation:              Demucs for MVP experiments
@@ -137,8 +141,33 @@ autodj-analysis analyze-batch <manifest.json> --out <cache-dir>
 
 The C++ app can invoke the worker or consume artifacts generated externally.
 
-Use Python 3.10 or 3.11 initially. Some MIR libraries lag newest Python
-versions, so do not jump to 3.12+ until dependency compatibility is verified.
+Use Python 3.11 in WSL for the full analysis environment. Some MIR libraries lag
+newest Python versions, so do not jump to 3.12+ until dependency compatibility
+is verified. Windows Python can run lightweight tests and rough-section smoke
+paths, but the selected semantic backend should be treated as WSL/Linux POC
+runtime unless a later packaging task proves otherwise.
+
+Current selected analysis stack:
+
+- BPM/beatgrid: `current-autodj-signal`, the project-owned electronic-music
+  timing stack.
+- Semantic sections: `dubstep-phrase-hybrid`, which fuses All-In-One and
+  SongFormer boundary evidence with selected beatgrid/energy/bass/onset
+  features and dubstep phrase heuristics.
+- Fallback: `current-autodj-signal` rough sections only if the selected section
+  backend cannot run or emits no usable sections.
+
+Current full WSL extras:
+
+```text
+analysis-wsl, all-in-one, songformer
+```
+
+The selected semantic path pulls in PyTorch/Torchaudio, TorchCodec, NATTEN,
+Demucs, CPJKU madmom, Transformers 4.51.x, Hugging Face Hub 0.30.x, MuQ, MSAF,
+and related model/runtime packages. Keep those optional and isolated from
+package import; missing heavy dependencies should produce structured
+unavailable/fallback behavior, not break lightweight tooling.
 
 For each analysis feature that proves valuable, record:
 
@@ -150,9 +179,51 @@ For each analysis feature that proves valuable, record:
 - licensing/platform constraints,
 - portability estimate for a future C++ implementation.
 
+## Selected Analysis Backends
+
+### current-autodj-signal
+
+Use `current-autodj-signal` as the selected BPM and beatgrid backend for the
+POC.
+
+Why:
+
+- Project-owned and deterministic.
+- Matched the known Rekordbox BPM/beatgrid cases better than the evaluated
+  timing candidates.
+- Emits complete beat grids, while several ML candidates looked deceptively good
+  only on nearest-beat error because they emitted sparse grids.
+- Keeps production artifacts free of timing fallback ambiguity.
+
+Do not auto-fallback from selected timing to Essentia, Beat This, or All-In-One
+timing without a new benchmark and manual user verdict.
+
+### dubstep-phrase-hybrid
+
+Use `dubstep-phrase-hybrid` as the selected semantic section backend for the
+POC.
+
+Why:
+
+- All-In-One and SongFormer both found useful boundaries but weak/wrong
+  pop-form labels for dubstep.
+- The hybrid layer uses those boundaries as evidence and maps them through
+  beat/bar, energy, bass, onset, and dubstep phrase heuristics.
+- It exposes useful build/drop pairs for transition planning while keeping
+  confidence and warnings honest.
+
+Runtime caveats:
+
+- Heavy WSL/Linux ML dependency stack.
+- Model/data/license terms still require productization review before
+  commercial distribution.
+- Long dense tracks, light/non-standard dubstep, and long inter-drop breaks are
+  known failure classes; transition planning should stay confidence-aware.
+
 ## Essentia
 
-Use Essentia as a primary POC/reference analysis library.
+Use Essentia as a comparison/reference analysis library, not as the selected
+timing backend.
 
 Useful capabilities:
 
@@ -163,9 +234,10 @@ Useful capabilities:
 - C++ implementation with Python bindings, giving a future path to native
   integration if needed.
 
-MVP use:
+POC use:
 
-- Run Essentia from Python or CLI for baseline descriptors.
+- Run Essentia from Python or CLI for baseline descriptors and future native
+  portability comparison.
 - Store raw extractor outputs for debugging.
 - Normalize key fields into `AnalyzedTrack`.
 
@@ -207,8 +279,11 @@ Candidates:
 - madmom: beat, downbeat, tempo, and MIR models; BSD-licensed source unless
   otherwise indicated, but older ecosystem and model/dependency compatibility
   must be checked.
+- Beat This: modern ML beat/downbeat comparison backend. Useful for benchmark
+  evidence, but not selected because it emitted sparse grids and no native BPM
+  in the Spec 005 integration.
 - BeatNet: AI-based real-time/offline beat, downbeat, tempo, and meter tracking;
-  useful for comparing beat/downbeat quality.
+  deferred because it overlaps Beat This and carries dependency friction.
 - aubio or maintained aubio forks: onset, tempo, beat, pitch, MFCC, and command
   line tools; GPL licensing can affect redistribution decisions.
 - MSAF: music structural segmentation experiments; useful for section boundary
@@ -219,8 +294,12 @@ Candidates:
   implementation and broad transform/feature support.
 - pyAudioAnalysis: Apache-licensed feature extraction, classification, and
   segmentation library; useful as a comparison baseline.
-- torchaudio: PyTorch audio/signal processing and feature extraction; useful if
-  ML-based models become part of the POC.
+- All-In-One: joint timing/functional section model. It is part of the selected
+  section backend as a boundary evidence source, but not selected for timing.
+- SongFormer: semantic section model. It is part of the selected section backend
+  as a boundary evidence source.
+- torchaudio: PyTorch audio/signal processing and feature extraction; needed by
+  several ML candidates.
 - Basic Pitch: Apache-licensed audio-to-MIDI/pitch transcription from Spotify;
   not a core BPM solution, but useful for melody/pitch experiments.
 - mir_eval: evaluation metrics for beat, tempo, key, and other MIR tasks; use it
@@ -404,11 +483,14 @@ Firm for MVP:
 
 Likely for MVP:
 
-- Essentia.
 - librosa.
-- madmom/BeatNet or another beat/downbeat comparison backend.
-- MSAF or another section-analysis comparison backend.
-- mir_eval for analysis quality evaluation.
+- soundfile/audioread/scipy/numpy analysis baseline.
+- current-autodj-signal timing.
+- dubstep-phrase-hybrid sections in WSL.
+- All-In-One and SongFormer as selected-section evidence providers.
+- Essentia, Beat This, and other candidates as explicit comparison/deferred
+  paths only.
+- mir_eval or equivalent metrics for analysis quality evaluation.
 - FFmpeg tools.
 - Demucs optional stem separation.
 

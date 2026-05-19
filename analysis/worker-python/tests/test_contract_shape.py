@@ -238,6 +238,12 @@ def test_generated_artifact_matches_required_analyzed_track_contract_shape() -> 
     _assert_generated_artifact_matches_required_contract_shape(artifact)
 
 
+def test_analyzed_track_contract_allows_project_break_section_label() -> None:
+    section_type_enum = _schema()["$defs"]["trackSection"]["properties"]["type"]["enum"]
+
+    assert "break" in section_type_enum
+
+
 def test_batch_written_artifact_matches_required_analyzed_track_contract_shape(tmp_path: Path) -> None:
     manifest_path = _write_manifest(tmp_path)
     cache_root = tmp_path / ".autodj-cache"

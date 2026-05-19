@@ -25,12 +25,15 @@ Core decisions:
 - Playback is a dumb, deterministic executor of a deck-control timeline.
 - DJ modules generate mix plans. The player does not contain genre logic.
 - Audio analysis and stem separation run offline before playback.
+- Selected BPM/beatgrid path is `current-autodj-signal`.
+- Selected semantic section path is `dubstep-phrase-hybrid`, with rough current
+  sections only as fallback.
 - The playback core must stay portable enough to move toward iOS/Android.
 
-The first implementation spec package is:
+The current adaptive analysis spec package is:
 
-- `../specs/001-init-foundation/`
+- `../specs/005-adaptive-mir-candidate-evaluation/`
 
-That folder contains Kiro-style `kiro.json`, `requirements.md`, `design.md`, and
-`tasks.md` files. The original single-file source spec remains available at
-`../specs/001-init-foundation.md`.
+That folder contains Kiro-style `kiro.json`, `requirements.md`, `design.md`,
+`tasks.md`, research, benchmark, and future-spec handoff files. Earlier spec
+packages remain under `../specs/`.

@@ -10,10 +10,17 @@ from autodj_analysis import (
     ANALYZER_PRODUCER,
     ANALYZER_VERSION,
     DEFAULT_PARAMETERS_HASH,
+    AnalysisContext,
     AudioLoadError,
     AudioProbe,
+    BackendExecutionError,
+    CandidateProvenance,
+    CurrentSignalBackend,
+    DecodedAudio,
     EnergyFeatures,
     RepositoryTrack,
+    SectionCandidate,
+    SectionCandidateResult,
     SignalAnalysisResult,
     StructureFeatures,
     TempoFeatures,
@@ -23,6 +30,7 @@ from autodj_analysis import (
     build_analyzed_track_artifact,
     waveform_path,
 )
+from autodj_analysis.batch import _select_semantic_section_result
 
 
 def _track(**overrides) -> RepositoryTrack:
@@ -240,6 +248,65 @@ def _signal_result(
     )
 
 
+def _selected_section_result() -> SectionCandidateResult:
+    return SectionCandidateResult(
+        status="ok",
+        provenance=CandidateProvenance(
+            backend_name="dubstep-phrase-hybrid",
+            backend_version="0.1.0",
+            model_name="dubstep-phrase-hybrid",
+            model_version="boundary-fusion-v1",
+            processing_seconds=1.25,
+            warnings=("Experimental dubstep phrase inference.",),
+        ),
+        sections=(
+            SectionCandidate(
+                id="section-build-001",
+                type="build",
+                start_seconds=16.0,
+                end_seconds=32.0,
+                confidence=0.62,
+                source_label="pre-chorus",
+                start_beat_index=64,
+                end_beat_index=128,
+                mapping_notes=("inferred backward from drop anchor",),
+            ),
+            SectionCandidate(
+                id="section-drop-001",
+                type="drop",
+                start_seconds=32.0,
+                end_seconds=64.0,
+                confidence=0.71,
+                source_label="chorus",
+                start_beat_index=128,
+                end_beat_index=256,
+                provider_metadata={"dropAnchorScore": 0.78},
+            ),
+            SectionCandidate(
+                id="section-break-001",
+                type="break",
+                start_seconds=64.0,
+                end_seconds=80.0,
+                confidence=0.55,
+                source_label="bridge",
+                start_beat_index=256,
+                end_beat_index=320,
+            ),
+        ),
+        cue_points=(
+            {
+                "id": "cue-drop-001",
+                "type": "drop",
+                "timeSeconds": 32.0,
+                "sectionId": "section-drop-001",
+                "confidence": 0.71,
+                "tags": ["hybrid", "beat_snapped"],
+                "beatIndex": 128,
+            },
+        ),
+    )
+
+
 def _write_manifest(tmp_path: Path, tracks: list[dict]) -> Path:
     music_root = tmp_path / "music"
     music_root.mkdir(exist_ok=True)
@@ -371,6 +438,98 @@ def test_build_analyzed_track_artifact_uses_honest_low_confidence_placeholders()
     assert artifact["quality"]["overallConfidence"] == 0.1
     assert "Only FFprobe" in artifact["quality"]["warnings"][0]
     assert "low-confidence placeholders" in artifact["quality"]["warnings"][0]
+
+
+def test_build_analyzed_track_artifact_prefers_selected_section_backend_result() -> None:
+    signal = _signal_result(
+        "track-drop-001",
+        "sha256:source-a",
+        "sha256:params",
+        "2026-05-16T00:00:00Z",
+        waveform_peak=0.8,
+    )
+    artifact = build_analyzed_track_artifact(
+        _track(),
+        _probe(),
+        created_at_utc="2026-05-16T00:00:00Z",
+        energy_features=signal.energy_features,
+        tempo_features=signal.tempo_features,
+        structure_features=signal.structure_features,
+        section_result=_selected_section_result(),
+    )
+
+    assert [section["type"] for section in artifact["sections"]] == ["build", "drop", "break"]
+    assert artifact["sections"][1]["id"] == "section-drop-001"
+    assert artifact["sections"][1]["sourceLabel"] == "chorus"
+    assert artifact["sections"][1]["providerMetadata"]["dropAnchorScore"] == 0.78
+    assert artifact["cuePoints"] == [
+        {
+            "id": "cue-drop-001",
+            "type": "drop",
+            "timeSeconds": 32.0,
+            "sectionId": "section-drop-001",
+            "confidence": 0.71,
+            "tags": ["hybrid", "beat_snapped"],
+            "beatIndex": 128,
+        }
+    ]
+    assert any("Experimental dubstep phrase inference" in warning for warning in artifact["quality"]["warnings"])
+
+
+def test_selected_section_backend_falls_back_to_current_signal_sections_when_unusable() -> None:
+    signal = _signal_result(
+        "track-drop-001",
+        "sha256:source-a",
+        "sha256:params",
+        "2026-05-16T00:00:00Z",
+        waveform_peak=0.8,
+    )
+    audio = DecodedAudio(
+        samples=[],
+        sample_rate=22050,
+        duration_seconds=12.5,
+        channels=1,
+        source_path=Path("track-drop-001.wav"),
+    )
+    context = AnalysisContext(
+        track_id="track-drop-001",
+        source_path=Path("track-drop-001.wav"),
+        analysis_audio_path=Path("track-drop-001.wav"),
+        duration_seconds=12.5,
+    )
+
+    class EmptySelectedBackend:
+        name = "dubstep-phrase-hybrid"
+
+        def analyze_sections(self, _audio, _features, _beat_grid, _context):
+            return SectionCandidateResult(
+                status="unavailable",
+                provenance=CandidateProvenance(backend_name=self.name),
+                error=BackendExecutionError(
+                    code="model_missing",
+                    message="section model is not installed",
+                    backend_name=self.name,
+                ),
+            )
+
+    result = _select_semantic_section_result(
+        section_backend="dubstep-phrase-hybrid",
+        section_backend_factory=EmptySelectedBackend,
+        current_backend=CurrentSignalBackend(),
+        audio=audio,
+        context=context,
+        energy_features=signal.energy_features,
+        tempo_features=signal.tempo_features,
+        structure_features=signal.structure_features,
+        extra_warnings=("analysis WAV could not be written",),
+    )
+
+    assert result.status == "ok"
+    assert result.provenance.backend_name == "current-autodj-signal"
+    assert [section.type for section in result.sections] == ["drop"]
+    assert result.cue_points[0]["type"] == "drop"
+    assert any("falling back to 'current-autodj-signal'" in warning for warning in result.provenance.warnings)
+    assert "analysis WAV could not be written" in result.provenance.warnings
 
 
 def test_build_analyzed_track_artifact_derives_title_from_probe_tags_then_filename() -> None:

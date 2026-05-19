@@ -213,6 +213,7 @@ def test_cli_analyze_batch_help_lists_expected_options(capsys) -> None:
     assert "--ffprobe" in captured.out
     assert "--force" in captured.out
     assert "--parameters-hash" in captured.out
+    assert "--section-backend" in captured.out
     assert "--json" in captured.out
 
 
@@ -227,6 +228,30 @@ def test_cli_debug_waveform_help_lists_expected_options(capsys) -> None:
     assert "--sample-rate" in captured.out
     assert "--low-cutoff-hz" in captured.out
     assert "--high-cutoff-hz" in captured.out
+
+
+def test_cli_benchmark_timing_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["benchmark-timing", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "cases" in captured.out
+    assert "--candidates" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--debug-waveform-points" in captured.out
+
+
+def test_cli_benchmark_sections_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["benchmark-sections", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "rekordbox_xml" in captured.out
+    assert "--candidates" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--debug-waveform-points" in captured.out
 
 
 @pytest.mark.analysis
@@ -296,6 +321,126 @@ def test_cli_analyze_batch_json_summary_output(tmp_path, capsys) -> None:
     assert seen_commands[0][0] == "fake-ffprobe"
     assert artifact["analyzer"]["parametersHash"] == "sha256:cli-params"
     assert waveform_path(cache_root, "track-a").exists()
+
+
+def test_cli_benchmark_timing_json_summary_output(tmp_path, capsys) -> None:
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "trackId": "track-a",
+                        "audioPath": str(tmp_path / "track-a.mp3"),
+                        "rekordboxXmlPath": str(tmp_path / "track-a.xml"),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    seen = {}
+
+    def runner(cases, output_root, **kwargs):
+        seen["cases"] = cases
+        seen["output_root"] = output_root
+        seen["kwargs"] = kwargs
+        return {
+            "ok": True,
+            "reportType": "timing-candidate-benchmark",
+            "outputRoot": str(output_root),
+            "cases": [],
+            "candidateSummary": [],
+        }
+
+    exit_code = main(
+        [
+            "benchmark-timing",
+            str(cases_path),
+            "--out",
+            str(tmp_path / "benchmark"),
+            "--candidates",
+            "current-autodj-signal,beat-this",
+            "--sample-rate",
+            "44100",
+            "--debug-waveform-points",
+            "1024",
+            "--json",
+        ],
+        timing_benchmark_runner=runner,
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["reportType"] == "timing-candidate-benchmark"
+    assert seen["cases"][0].track_id == "track-a"
+    assert seen["kwargs"]["candidates"] == ("current-autodj-signal", "beat-this")
+    assert seen["kwargs"]["analysis_sample_rate"] == 44100
+    assert seen["kwargs"]["debug_waveform_points"] == 1024
+
+
+def test_cli_benchmark_sections_json_summary_output(tmp_path, capsys) -> None:
+    audio_path = tmp_path / "track-a.mp3"
+    audio_path.write_bytes(b"audio")
+    xml_path = tmp_path / "rekordbox.xml"
+    xml_path.write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0">
+  <COLLECTION Entries="1">
+    <TRACK Name="Track A" AverageBpm="150.00" Location="{audio_path.as_uri()}">
+      <TEMPO Inizio="0.000" Bpm="150.00" Metro="4/4" Battito="1"/>
+      <POSITION_MARK Name="drop_1_start" Type="0" Start="16.000" Num="0"/>
+      <POSITION_MARK Name="drop_1_end" Type="0" Start="32.000" Num="1"/>
+    </TRACK>
+  </COLLECTION>
+</DJ_PLAYLISTS>
+""",
+        encoding="utf-8",
+    )
+    seen = {}
+
+    def runner(cases, output_root, **kwargs):
+        seen["cases"] = cases
+        seen["output_root"] = output_root
+        seen["kwargs"] = kwargs
+        return {
+            "ok": True,
+            "reportType": "semantic-section-candidate-benchmark",
+            "outputRoot": str(output_root),
+            "cases": [],
+            "candidateSummary": [],
+        }
+
+    exit_code = main(
+        [
+            "benchmark-sections",
+            str(xml_path),
+            "--out",
+            str(tmp_path / "section-benchmark"),
+            "--candidates",
+            "current-autodj-signal,songformer",
+            "--sample-rate",
+            "44100",
+            "--debug-waveform-points",
+            "2048",
+            "--json",
+        ],
+        semantic_benchmark_runner=runner,
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["reportType"] == "semantic-section-candidate-benchmark"
+    assert seen["cases"][0].track_name == "Track A"
+    assert seen["kwargs"]["candidates"] == ("current-autodj-signal", "songformer")
+    assert seen["kwargs"]["analysis_sample_rate"] == 44100
+    assert seen["kwargs"]["debug_waveform_points"] == 2048
 
 
 def test_cli_analyze_batch_successful_human_output(tmp_path, capsys) -> None:

@@ -33,6 +33,42 @@ analysis-candidates = [
     "mir_eval>=0.8,<0.9",
     "pyAudioAnalysis>=0.3.14,<0.4"
 ]
+beat-this = [
+    "beat-this>=1.1,<1.2",
+    "torch>=2.12,<2.13",
+    "torchaudio>=2.11,<2.12"
+]
+all-in-one = [
+    "allin1>=1.1,<1.2",
+    "torch>=2.12,<2.13",
+    "torchaudio>=2.11,<2.12",
+    "torchcodec>=0.12,<0.13",
+    "natten==0.21.6",
+    "cmake>=4.3,<4.4; platform_system == 'Linux'",
+    "ninja>=1.13,<1.14; platform_system == 'Linux'",
+    "nvidia-cuda-runtime==13.0.96; platform_system == 'Linux'",
+    "nvidia-cuda-nvcc==13.0.88; platform_system == 'Linux'",
+    "nvidia-cuda-crt==13.0.88; platform_system == 'Linux'",
+    "nvidia-nvvm==13.0.88; platform_system == 'Linux'",
+    "nvidia-cuda-cccl==13.0.85; platform_system == 'Linux'",
+    "madmom @ git+https://github.com/CPJKU/madmom"
+]
+songformer = [
+    "transformers>=4.51,<4.52",
+    "huggingface-hub>=0.30,<0.31",
+    "torch>=2.12,<2.13",
+    "torchaudio>=2.11,<2.12",
+    "torchvision>=0.27,<0.28",
+    "torchcodec>=0.12,<0.13",
+    "safetensors>=0.5,<0.6",
+    "librosa>=0.11,<0.12",
+    "ema-pytorch>=0.7,<0.8",
+    "x-transformers>=2.19,<2.20",
+    "omegaconf>=2.3,<2.4",
+    "loguru>=0.7,<0.8",
+    "muq>=0.1,<0.2",
+    "msaf>=0.1.80,<0.2"
+]
 
 [project.scripts]
 autodj-analysis = "autodj_analysis.cli:main"
