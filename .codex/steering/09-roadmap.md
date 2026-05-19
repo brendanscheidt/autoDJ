@@ -68,20 +68,31 @@ Success:
 
 Target: 1 to 2 weeks.
 
+Spec 005 status:
+
+- BPM/beatgrid selected path is `current-autodj-signal`.
+- Semantic section selected path is `dubstep-phrase-hybrid`, with
+  `current-autodj-signal` rough sections retained only as fallback.
+- Deferred MIR/provider/stem/native candidates are cataloged in
+  `.codex/specs/005-adaptive-mir-candidate-evaluation/deferred-candidates-and-future-specs.md`.
+
 Deliverables:
 
 - FFmpeg probe/decode integration.
-- Python POC/reference analyzer using strong MIR libraries aggressively.
-- Essentia baseline descriptors.
-- librosa supplemental energy/onset helpers.
-- Beat/downbeat comparison against madmom, BeatNet, aubio, Vamp/QM plugins, or
-  other viable libraries.
-- Structure/cue experiments with MSAF, Essentia/librosa features, and custom
-  heuristics.
+- Python POC/reference analyzer using strong MIR libraries aggressively where
+  they materially improve output quality.
+- Selected BPM/beatgrid artifact path using `current-autodj-signal`.
+- Selected section artifact path using `dubstep-phrase-hybrid`.
+- Comparison/deferred timing candidates documented for later reference:
+  Essentia, Beat This, All-In-One timing, BeatNet, madmom, aubio, Vamp/QM, and
+  Superpowered.
+- Deferred structure/cue candidates documented for later reference:
+  All-In-One/SongFormer evidence layers, automatic cue switch points, cue object
+  detection, MSAF, and hosted semantic providers.
 - Evaluation harness using generated fixtures and mir_eval where useful.
 - BPM/key/beat grid fields in `AnalyzedTrack`.
 - Basic waveform overview.
-- Stub or heuristic section detection.
+- Semantic section detection with honest confidence and fallback behavior.
 - Cue candidate generation.
 - Confidence values.
 - Portability notes for later native/mobile analysis implementation.
@@ -139,7 +150,7 @@ Target: 1 to 2 weeks.
 
 Deliverables:
 
-- Candidate transition generation.
+- Candidate transition generation using selected beatgrid and section metadata.
 - BPM/key/phrase compatibility scoring.
 - Intro/outro blend template.
 - Build-to-drop swap template.
@@ -175,7 +186,9 @@ Target: 2 to 4 weeks.
 
 Deliverables:
 
-- Demucs wrapper.
+- Demucs wrapper as the first likely local candidate.
+- Optional comparison notes for BS-RoFormer/Mel-Band RoFormer, Open-Unmix,
+  Spleeter, AudioShake, Music AI, and zplane STEMS before product commitment.
 - Stem cache.
 - Vocal region detection from stems.
 - Stem quality gating.
@@ -193,9 +206,10 @@ Target: ongoing.
 
 Deliverables:
 
-- Improved drop/build/breakdown detection.
+- Confidence calibration and regression cleanup for `dubstep-phrase-hybrid`.
+- Improved drop/build/break detection only after real transition failures show
+  where the selected backend is insufficient.
 - UI correction tools for section/cue errors.
-- Confidence calibration.
 - Regression fixtures from bad analysis cases.
 
 Success:

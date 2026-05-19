@@ -62,6 +62,23 @@ def load_rekordbox_track(xml_path: str | Path, *, track_name: str | None = None)
     """Load the first Rekordbox track, or the named track when provided."""
 
     path = Path(xml_path)
+    tracks = load_rekordbox_tracks(path)
+
+    if track_name:
+        selected = next((track for track in tracks if track.name == track_name), None)
+        if selected is None:
+            raise RekordboxXmlError(
+                "rekordbox_xml_track_not_found",
+                f"Rekordbox XML did not contain a track named {track_name!r}",
+            )
+        return selected
+    return tracks[0]
+
+
+def load_rekordbox_tracks(xml_path: str | Path) -> tuple[RekordboxTrack, ...]:
+    """Load all Rekordbox tracks from an XML export."""
+
+    path = Path(xml_path)
     try:
         root = ET.parse(path).getroot()
     except OSError as exc:
@@ -73,34 +90,28 @@ def load_rekordbox_track(xml_path: str | Path, *, track_name: str | None = None)
     if not tracks:
         raise RekordboxXmlError("rekordbox_xml_no_tracks", "Rekordbox XML did not contain any TRACK entries")
 
-    selected = None
-    if track_name:
-        selected = next((track for track in tracks if track.get("Name") == track_name), None)
-        if selected is None:
-            raise RekordboxXmlError(
-                "rekordbox_xml_track_not_found",
-                f"Rekordbox XML did not contain a track named {track_name!r}",
+    parsed_tracks: list[RekordboxTrack] = []
+    for track in tracks:
+        tempos = tuple(_parse_tempo(element) for element in track.findall("TEMPO"))
+        if not tempos:
+            raise RekordboxXmlError("rekordbox_xml_no_tempo", "Selected Rekordbox track has no TEMPO entries")
+
+        cues = tuple(
+            sorted(
+                (_parse_cue(element) for element in track.findall("POSITION_MARK")),
+                key=lambda cue: (cue.start_seconds, cue.num if cue.num is not None else math.inf),
             )
-    else:
-        selected = tracks[0]
-
-    tempos = tuple(_parse_tempo(element) for element in selected.findall("TEMPO"))
-    if not tempos:
-        raise RekordboxXmlError("rekordbox_xml_no_tempo", "Selected Rekordbox track has no TEMPO entries")
-
-    cues = tuple(
-        sorted(
-            (_parse_cue(element) for element in selected.findall("POSITION_MARK")),
-            key=lambda cue: (cue.start_seconds, cue.num if cue.num is not None else math.inf),
         )
-    )
-    return RekordboxTrack(
-        name=selected.get("Name", ""),
-        location=selected.get("Location", ""),
-        average_bpm=_optional_float(selected.get("AverageBpm")),
-        tempos=tempos,
-        cues=cues,
-    )
+        parsed_tracks.append(
+            RekordboxTrack(
+                name=track.get("Name", ""),
+                location=track.get("Location", ""),
+                average_bpm=_optional_float(track.get("AverageBpm")),
+                tempos=tempos,
+                cues=cues,
+            )
+        )
+    return tuple(parsed_tracks)
 
 
 def apply_rekordbox_overrides(

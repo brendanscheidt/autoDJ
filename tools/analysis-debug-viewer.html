@@ -17,10 +17,10 @@
       --wave-fill: rgba(45, 89, 98, 0.26);
       --rms: #7b5eaa;
       --energy: #b05b32;
-      --beat: rgba(30, 121, 91, 0.42);
-      --bar: rgba(30, 121, 91, 0.8);
+      --beat: rgba(24, 34, 44, 0.58);
+      --bar: #007f89;
       --cue: #c33b42;
-      --section: rgba(235, 171, 75, 0.28);
+      --section: rgba(235, 171, 75, 0.24);
       --reference: rgba(40, 98, 184, 0.42);
       --selection: rgba(30, 121, 91, 0.18);
       --playhead: #101010;
@@ -364,7 +364,8 @@
         <span style="color: var(--wave);"><i class="swatch"></i>Waveform peak</span>
         <span style="color: var(--rms);"><i class="swatch"></i>RMS</span>
         <span style="color: var(--energy);"><i class="swatch"></i>Energy</span>
-        <span style="color: var(--bar);"><i class="swatch"></i>Beat grid</span>
+        <span style="color: var(--beat);"><i class="swatch"></i>Beats</span>
+        <span style="color: var(--bar);"><i class="swatch"></i>Bars</span>
         <span style="color: var(--cue);"><i class="swatch"></i>Cue points</span>
         <span style="color: var(--section);"><i class="swatch"></i>Sections</span>
         <span style="color: var(--reference);"><i class="swatch"></i>Reference grid</span>
@@ -1196,16 +1197,23 @@
         const x = timeToX(area, view, time);
         const beatIndex = Number.isFinite(Number(beat.index)) ? Number(beat.index) : index;
         const isBar = beatIndex % 4 === 0;
-        ctx.strokeStyle = isBar ? getCss("--bar") : getCss("--beat");
-        ctx.lineWidth = isBar ? 1.25 : 0.75;
-        ctx.beginPath();
-        ctx.moveTo(x, area.top);
-        ctx.lineTo(x, area.bottom);
-        ctx.stroke();
+        drawVerticalMarker(
+          ctx,
+          x,
+          area.top,
+          area.bottom,
+          isBar ? getCss("--bar") : getCss("--beat"),
+          isBar ? 2.2 : 1.15,
+        );
 
         if (labelEvery > 0 && beatIndex % labelEvery === 0) {
-          ctx.fillStyle = "#2e6d55";
-          ctx.fillText(String(beatIndex), x + 3, area.top + 2);
+          const label = String(beatIndex);
+          const labelWidth = ctx.measureText(label).width + 8;
+          const labelX = clamp(x + 3, area.left, area.right - labelWidth);
+          ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
+          ctx.fillRect(labelX, area.top + 2, labelWidth, 16);
+          ctx.fillStyle = isBar ? getCss("--bar") : "#2f3b46";
+          ctx.fillText(label, labelX + 4, area.top + 4);
         }
       });
     }
@@ -1230,17 +1238,12 @@
         time += beatSeconds;
       }
 
-      ctx.strokeStyle = getCss("--reference");
-      ctx.lineWidth = 0.8;
       for (; time <= view.end; time += beatSeconds) {
         if (time < 0) {
           continue;
         }
         const x = timeToX(area, view, time);
-        ctx.beginPath();
-        ctx.moveTo(x, area.top);
-        ctx.lineTo(x, area.bottom);
-        ctx.stroke();
+        drawVerticalMarker(ctx, x, area.top, area.bottom, getCss("--reference"), 0.8, false);
       }
     }
 
@@ -1265,10 +1268,22 @@
         const visibleEnd = Math.min(end, view.end);
         const x = timeToX(area, view, visibleStart);
         const w = Math.max(2, timeToX(area, view, visibleEnd) - x);
-        ctx.fillStyle = getCss("--section");
+        ctx.fillStyle = sectionFillColor(section.type);
         ctx.fillRect(x, area.top, w, area.height);
-        ctx.fillStyle = "#71501a";
-        ctx.fillText(`${section.type || "section"} ${formatTime(start, 2)}`, x + 5, area.bottom - 22);
+        ctx.strokeStyle = sectionStrokeColor(section.type);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, area.top);
+        ctx.lineTo(x, area.bottom);
+        ctx.stroke();
+
+        const label = `${section.type || "section"} ${formatTime(start, 2)}`;
+        const labelWidth = Math.min(ctx.measureText(label).width + 10, Math.max(48, w - 6));
+        const labelX = clamp(x + 4, area.left, area.right - labelWidth);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+        ctx.fillRect(labelX, area.bottom - 26, labelWidth, 20);
+        ctx.fillStyle = sectionTextColor(section.type);
+        ctx.fillText(label, labelX + 5, area.bottom - 22);
       });
     }
 
@@ -1289,16 +1304,31 @@
           return;
         }
         const x = timeToX(area, view, time);
-        ctx.strokeStyle = getCss("--cue");
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(x, area.top);
-        ctx.lineTo(x, area.bottom);
-        ctx.stroke();
+        drawVerticalMarker(ctx, x, area.top, area.bottom, getCss("--cue"), 2.4);
         ctx.fillStyle = getCss("--cue");
         const label = `${cue.type || "cue"} ${formatTime(time, 3)}`;
         ctx.fillText(label, x + 5, area.top + 18 + (index % 5) * 16);
       });
+    }
+
+    function drawVerticalMarker(targetCtx, x, y1, y2, color, width, halo = true) {
+      targetCtx.save();
+      targetCtx.lineCap = "butt";
+      if (halo) {
+        targetCtx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+        targetCtx.lineWidth = width + 2.4;
+        targetCtx.beginPath();
+        targetCtx.moveTo(x, y1);
+        targetCtx.lineTo(x, y2);
+        targetCtx.stroke();
+      }
+      targetCtx.strokeStyle = color;
+      targetCtx.lineWidth = width;
+      targetCtx.beginPath();
+      targetCtx.moveTo(x, y1);
+      targetCtx.lineTo(x, y2);
+      targetCtx.stroke();
+      targetCtx.restore();
     }
 
     function drawHover(area, view) {
@@ -1484,8 +1514,14 @@
         }
         const x = overviewTimeToX(area, fullDuration, Math.max(0, start));
         const w = Math.max(2, overviewTimeToX(area, fullDuration, Math.min(end, fullDuration)) - x);
-        overviewCtx.fillStyle = getCss("--section");
+        overviewCtx.fillStyle = sectionFillColor(section.type, 0.34);
         overviewCtx.fillRect(x, area.top, w, area.height);
+        overviewCtx.strokeStyle = sectionStrokeColor(section.type);
+        overviewCtx.lineWidth = 1;
+        overviewCtx.beginPath();
+        overviewCtx.moveTo(x, area.top);
+        overviewCtx.lineTo(x, area.bottom);
+        overviewCtx.stroke();
       }
     }
 
@@ -1494,18 +1530,13 @@
         return;
       }
 
-      overviewCtx.strokeStyle = getCss("--cue");
-      overviewCtx.lineWidth = 1.5;
       for (const cue of getCues()) {
         const time = Number(cue.timeSeconds);
         if (!Number.isFinite(time)) {
           continue;
         }
         const x = overviewTimeToX(area, fullDuration, time);
-        overviewCtx.beginPath();
-        overviewCtx.moveTo(x, area.top);
-        overviewCtx.lineTo(x, area.bottom);
-        overviewCtx.stroke();
+        drawVerticalMarker(overviewCtx, x, area.top, area.bottom, getCss("--cue"), 1.8);
       }
     }
 
@@ -1553,6 +1584,40 @@
       for (let time = 0; time <= fullDuration + 0.001; time += tickStep) {
         const x = overviewTimeToX(area, fullDuration, time);
         overviewCtx.fillText(formatTime(time, 0), x + 3, area.bottom + 6);
+      }
+    }
+
+    function sectionFillColor(type, alpha = 0.26) {
+      const [r, g, b] = sectionRgb(type);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function sectionStrokeColor(type) {
+      const [r, g, b] = sectionRgb(type);
+      return `rgba(${r}, ${g}, ${b}, 0.92)`;
+    }
+
+    function sectionTextColor(type) {
+      const [r, g, b] = sectionRgb(type);
+      return `rgb(${Math.max(30, r - 48)}, ${Math.max(30, g - 48)}, ${Math.max(30, b - 48)})`;
+    }
+
+    function sectionRgb(type) {
+      switch (String(type || "").toLowerCase()) {
+        case "build":
+          return [217, 137, 29];
+        case "drop":
+          return [209, 58, 72];
+        case "break":
+          return [112, 88, 178];
+        case "verse":
+          return [52, 112, 181];
+        case "intro":
+          return [92, 127, 116];
+        case "outro":
+          return [102, 102, 112];
+        default:
+          return [165, 117, 48];
       }
     }
 

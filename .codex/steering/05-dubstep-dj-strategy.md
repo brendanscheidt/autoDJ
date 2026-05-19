@@ -59,7 +59,7 @@ The strategy works best when each `AnalyzedTrack` includes:
 - BPM and normalized BPM.
 - Beat grid and downbeats.
 - Key/Camelot estimate.
-- Sections: intro, build, drop, breakdown, outro.
+- Sections: intro, verse, build, ordered drops, break, outro.
 - Energy curve.
 - Bass energy curve.
 - Vocal regions.
@@ -68,6 +68,11 @@ The strategy works best when each `AnalyzedTrack` includes:
 
 Each feature must have confidence. The strategy should prefer simple transitions
 when confidence is low.
+
+For dubstep, repeated drops should be addressed by order within the track:
+drop 1, drop 2, drop 3, and so on. Use canonical section labels in artifacts
+and carry the order in section IDs/indices. Treat `break` as the canonical
+breakdown/break-verse staging region between drops.
 
 ## Transition Templates
 
@@ -104,6 +109,22 @@ Typical automation:
 - Hard or near-hard swap at incoming drop.
 - Restore lows on incoming deck at drop.
 
+### Second-Build Drop Swap
+
+Use when:
+
+- Song 1 has already played drop 1.
+- Song 1 has a high-confidence second build and known bar count until drop 2.
+- Song 2 has a compatible build 1 and drop 1.
+- The two builds can be aligned so both drops land on the same downbeat.
+
+Typical automation:
+
+- Count bars from song 1 build 2 start to song 1 drop 2.
+- Start song 2 build 1 the same number of bars before its drop.
+- Fade song 1 out so it is fully gone one bar before the drop.
+- Let song 2 own the pre-drop bar and drop.
+
 ### Drop Double
 
 Use when:
@@ -123,6 +144,47 @@ Typical automation:
 Risk:
 
 - This can sound bad quickly. Require high confidence and conservative duration.
+
+### Vocal Predrop Layer And Drop Chop
+
+Use when:
+
+- The tracks are harmonically compatible.
+- Song 2 has a clean vocal/acapella stem.
+- Song 1 has a verse or break region with low vocal clash risk.
+- Both tracks have compatible builds and drops.
+
+Typical automation:
+
+- Layer song 2 vocal over song 1 verse/break.
+- At the build, bring in song 2 build while tightening or looping the vocal.
+- Use one clean pre-drop bar from either song.
+- Chop between compatible drops every 4 bars, ending on song 2 break.
+
+Risk:
+
+- Requires reliable key/chord compatibility, stem quality, vocal timing, and
+  phrase-aware drop segmentation.
+
+### Frequency-Complement Drop Double
+
+Use when:
+
+- Both drops are rhythmically compatible.
+- One drop carries strong low end with sparse high end.
+- The other drop carries complementary high end with controllable low/mid
+  energy.
+
+Typical automation:
+
+- Align drops on the same downbeat.
+- Cut or reduce high end on the low-end-heavy track.
+- Cut or reduce low/mid energy on the high-end-heavy track.
+- Keep the double short unless frequency clash metrics remain strong.
+
+Risk:
+
+- Requires reliable band-energy and masking analysis, not just section labels.
 
 ### Loop Tighten
 
@@ -326,4 +388,3 @@ Every transition should include:
 - Rejected alternatives when useful.
 
 This is essential for making bad transitions fixable.
-

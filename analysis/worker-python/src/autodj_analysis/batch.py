@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from . import __version__
-from .audio_io import AudioLoadError, load_audio
+from .audio_io import AudioLoadError, DecodedAudio
+from .backends.base import (
+    AnalysisContext,
+    FeatureBundle,
+    SectionBackend,
+    SectionCandidateResult,
+)
+from .backends.current_signal import CURRENT_SIGNAL_BACKEND
+from .backends.dubstep_phrase_hybrid import DUBSTEP_PHRASE_HYBRID_BACKEND, DubstepPhraseHybridBackend
 from .cache import (
     ArtifactIdentity,
     CacheError,
@@ -20,7 +28,7 @@ from .cache import (
     waveform_path,
     write_json_atomic,
 )
-from .features import EnergyFeatures, FeatureExtractionError, build_energy_analysis, compute_energy_features
+from .features import EnergyFeatures, FeatureExtractionError, build_energy_analysis
 from .manifest import RepositoryManifest, RepositoryTrack, load_repository_manifest
 from .probe import AudioProbe, ProbeError, ProbeRunner, probe_audio
 from .structure import (
@@ -28,15 +36,15 @@ from .structure import (
     StructureFeatures,
     build_cue_points,
     build_sections,
-    compute_structure_features,
 )
-from .tempo import TempoExtractionError, TempoFeatures, build_beat_grid, build_tempo_analysis, compute_tempo_features
-from .waveform import WaveformError, build_waveform_artifact, write_waveform_artifact
+from .tempo import TempoExtractionError, TempoFeatures, build_beat_grid, build_tempo_analysis
+from .waveform import WaveformError, write_waveform_artifact
 
 
 ANALYZER_PRODUCER = "autodj_analysis.signal"
 ANALYZER_VERSION = __version__
-DEFAULT_PARAMETERS_HASH = "sha256:signal-v1-waveform-energy-tempo-structure-v1"
+SELECTED_SECTION_BACKEND = DUBSTEP_PHRASE_HYBRID_BACKEND
+DEFAULT_PARAMETERS_HASH = "sha256:signal-v2-waveform-energy-tempo-dubstep-phrase-hybrid-v1"
 FFPROBE_ONLY_WARNING = (
     "Only FFprobe container/stream metadata was analyzed; BPM, key, beat grid, "
     "sections, energy, vocals, stems, and cue points are low-confidence placeholders."
@@ -57,9 +65,11 @@ class SignalAnalysisResult:
     energy_features: EnergyFeatures
     tempo_features: TempoFeatures
     structure_features: StructureFeatures
+    section_result: SectionCandidateResult | None = None
 
 
 SignalAnalyzer = Callable[[RepositoryTrack, ArtifactIdentity, str], SignalAnalysisResult]
+SectionBackendFactory = Callable[[], SectionBackend]
 
 
 @dataclass(frozen=True)
@@ -129,6 +139,8 @@ def analyze_repository_manifest(
     parameters_hash: str = DEFAULT_PARAMETERS_HASH,
     probe_runner: ProbeRunner | None = None,
     signal_analyzer: SignalAnalyzer | None = None,
+    section_backend: str = SELECTED_SECTION_BACKEND,
+    section_backend_factory: SectionBackendFactory | None = None,
 ) -> BatchAnalysisResult:
     """Load a repository manifest and analyze each track into the cache root."""
 
@@ -141,6 +153,8 @@ def analyze_repository_manifest(
         parameters_hash=parameters_hash,
         probe_runner=probe_runner,
         signal_analyzer=signal_analyzer,
+        section_backend=section_backend,
+        section_backend_factory=section_backend_factory,
     )
 
 
@@ -153,6 +167,8 @@ def analyze_manifest(
     parameters_hash: str = DEFAULT_PARAMETERS_HASH,
     probe_runner: ProbeRunner | None = None,
     signal_analyzer: SignalAnalyzer | None = None,
+    section_backend: str = SELECTED_SECTION_BACKEND,
+    section_backend_factory: SectionBackendFactory | None = None,
 ) -> BatchAnalysisResult:
     """Analyze every track from a parsed repository manifest.
 
@@ -171,6 +187,8 @@ def analyze_manifest(
             parameters_hash=parameters_hash,
             probe_runner=probe_runner,
             signal_analyzer=signal_analyzer,
+            section_backend=section_backend,
+            section_backend_factory=section_backend_factory,
         )
         for track in manifest.tracks
     )
@@ -215,6 +233,8 @@ def _analyze_manifest_track(
     parameters_hash: str,
     probe_runner: ProbeRunner | None,
     signal_analyzer: SignalAnalyzer | None,
+    section_backend: str,
+    section_backend_factory: SectionBackendFactory | None,
 ) -> BatchTrackResult:
     artifact_path: Path | None = None
     waveform_artifact_path: Path | None = None
@@ -249,7 +269,18 @@ def _analyze_manifest_track(
             runner=probe_runner,
         )
         created_at_utc = _utc_now_iso()
-        signal_result = (signal_analyzer or analyze_track_signal)(track, identity, created_at_utc)
+        if signal_analyzer is None:
+            signal_result = analyze_track_signal(
+                track,
+                identity,
+                created_at_utc,
+                section_backend=section_backend,
+                section_backend_factory=section_backend_factory,
+                temp_dir=artifact_path.parent / "section-backend-work",
+                ffprobe_start_time_seconds=probe.start_time_seconds,
+            )
+        else:
+            signal_result = signal_analyzer(track, identity, created_at_utc)
         artifact = build_analyzed_track_artifact(
             track,
             probe,
@@ -260,6 +291,7 @@ def _analyze_manifest_track(
             energy_features=signal_result.energy_features,
             tempo_features=signal_result.tempo_features,
             structure_features=signal_result.structure_features,
+            section_result=signal_result.section_result,
         )
         write_json_atomic(artifact_path, artifact)
         write_waveform_artifact(cache_root, track.track_id, signal_result.waveform_artifact)
@@ -292,36 +324,48 @@ def analyze_track_signal(
     track: RepositoryTrack,
     identity: ArtifactIdentity,
     created_at_utc: str,
+    *,
+    section_backend: str = SELECTED_SECTION_BACKEND,
+    section_backend_factory: SectionBackendFactory | None = None,
+    temp_dir: str | Path | None = None,
+    ffprobe_start_time_seconds: float | None = None,
 ) -> SignalAnalysisResult:
     """Decode audio and compute real signal-derived analysis features."""
 
-    decoded_audio = load_audio(
-        track.source_path,
-        source_uri=track.source_uri,
+    from .backends.current_signal import CurrentSignalBackend
+
+    current_backend = CurrentSignalBackend()
+    signal_result = current_backend.analyze_signal(track, identity, created_at_utc)
+    selected_section_backend = section_backend.strip() or SELECTED_SECTION_BACKEND
+    if selected_section_backend == CURRENT_SIGNAL_BACKEND:
+        return replace(
+            signal_result,
+            section_result=current_backend.section_result_from_features(signal_result.structure_features),
+        )
+    audio = current_backend.load_track_audio(track)
+    work_dir = Path(temp_dir) if temp_dir is not None else None
+    analysis_audio_path, audio_warnings = _write_section_analysis_audio(audio, work_dir)
+    context = AnalysisContext(
         track_id=track.track_id,
+        source_path=track.source_path,
+        analysis_audio_path=analysis_audio_path,
+        duration_seconds=audio.duration_seconds,
+        ffprobe_start_time_seconds=ffprobe_start_time_seconds,
+        temp_dir=work_dir,
+        source_content_hash=identity.source_content_hash,
     )
-    waveform_artifact = build_waveform_artifact(
-        track.track_id,
-        decoded_audio,
-        analyzer_producer=identity.analyzer_producer,
-        analyzer_version=identity.analyzer_version,
-        source_content_hash=identity.source_content_hash or "",
-        parameters_hash=identity.parameters_hash or "",
-        created_at_utc=created_at_utc,
+    section_result = _select_semantic_section_result(
+        section_backend=selected_section_backend,
+        section_backend_factory=section_backend_factory,
+        current_backend=current_backend,
+        audio=audio,
+        context=context,
+        energy_features=signal_result.energy_features,
+        tempo_features=signal_result.tempo_features,
+        structure_features=signal_result.structure_features,
+        extra_warnings=audio_warnings,
     )
-    energy_features = compute_energy_features(decoded_audio)
-    tempo_features = compute_tempo_features(decoded_audio)
-    structure_features = compute_structure_features(
-        energy_features,
-        tempo_features=tempo_features,
-        duration_seconds=decoded_audio.duration_seconds,
-    )
-    return SignalAnalysisResult(
-        waveform_artifact=waveform_artifact,
-        energy_features=energy_features,
-        tempo_features=tempo_features,
-        structure_features=structure_features,
-    )
+    return replace(signal_result, section_result=section_result)
 
 
 def build_analyzed_track_artifact(
@@ -335,6 +379,7 @@ def build_analyzed_track_artifact(
     energy_features: EnergyFeatures | None = None,
     tempo_features: TempoFeatures | None = None,
     structure_features: StructureFeatures | None = None,
+    section_result: SectionCandidateResult | None = None,
 ) -> dict[str, Any]:
     """Build an AnalyzedTrack artifact from repository identity and probe data."""
 
@@ -344,6 +389,7 @@ def build_analyzed_track_artifact(
         energy_features is not None
         or tempo_features is not None
         or structure_features is not None
+        or section_result is not None
     )
     warnings = [PARTIAL_SIGNAL_WARNING if has_signal_features else FFPROBE_ONLY_WARNING]
     if probe.duration_seconds is None and track.duration_seconds is None:
@@ -356,8 +402,12 @@ def build_analyzed_track_artifact(
         warnings.extend(energy_features.warnings)
     if tempo_features is not None:
         warnings.extend(tempo_features.warnings)
-    if structure_features is not None:
+    if structure_features is not None and section_result is None:
         warnings.extend(structure_features.warnings)
+    if section_result is not None:
+        warnings.extend(section_result.provenance.warnings)
+        if section_result.status != "ok" and section_result.error is not None:
+            warnings.append(section_result.error.message)
 
     analyzer = {
         "producer": analyzer_producer,
@@ -381,19 +431,20 @@ def build_analyzed_track_artifact(
             "candidates": [],
         },
         "beatGrid": _beat_grid(tempo_features),
-        "sections": _sections(structure_features),
+        "sections": _sections(section_result=section_result, structure_features=structure_features),
         "energy": _energy_analysis(energy_features),
         "vocals": {
             "hasVocals": False,
             "confidence": 0.0,
             "regions": [],
         },
-        "cuePoints": _cue_points(structure_features),
+        "cuePoints": _cue_points(section_result=section_result, structure_features=structure_features),
         "quality": {
             "overallConfidence": _overall_confidence(
                 energy_features=energy_features,
                 tempo_features=tempo_features,
                 structure_features=structure_features,
+                section_result=section_result,
             ),
             "warnings": warnings,
         },
@@ -478,15 +529,27 @@ def _beat_grid(features: TempoFeatures | None) -> dict[str, Any]:
     }
 
 
-def _sections(features: StructureFeatures | None) -> list[dict[str, Any]]:
-    if features is not None:
-        return build_sections(features)
+def _sections(
+    *,
+    section_result: SectionCandidateResult | None,
+    structure_features: StructureFeatures | None,
+) -> list[dict[str, Any]]:
+    if section_result is not None:
+        return [section.to_dict() for section in section_result.sections]
+    if structure_features is not None:
+        return build_sections(structure_features)
     return []
 
 
-def _cue_points(features: StructureFeatures | None) -> list[dict[str, Any]]:
-    if features is not None:
-        return build_cue_points(features)
+def _cue_points(
+    *,
+    section_result: SectionCandidateResult | None,
+    structure_features: StructureFeatures | None,
+) -> list[dict[str, Any]]:
+    if section_result is not None:
+        return [dict(cue) for cue in section_result.cue_points]
+    if structure_features is not None:
+        return build_cue_points(structure_features)
     return []
 
 
@@ -495,8 +558,14 @@ def _overall_confidence(
     energy_features: EnergyFeatures | None,
     tempo_features: TempoFeatures | None,
     structure_features: StructureFeatures | None,
+    section_result: SectionCandidateResult | None,
 ) -> float:
-    if energy_features is None and tempo_features is None and structure_features is None:
+    if (
+        energy_features is None
+        and tempo_features is None
+        and structure_features is None
+        and section_result is None
+    ):
         return 0.1
 
     confidence_values: list[float] = []
@@ -505,14 +574,129 @@ def _overall_confidence(
     if tempo_features is not None:
         confidence_values.append(tempo_features.confidence)
         confidence_values.append(tempo_features.beat_grid_confidence)
-    if structure_features is not None and structure_features.sections:
+    if section_result is None and structure_features is not None and structure_features.sections:
         confidence_values.append(max(float(section["confidence"]) for section in structure_features.sections))
-    elif structure_features is not None:
+    elif section_result is None and structure_features is not None:
         confidence_values.append(0.2)
+    if section_result is not None and section_result.status == "ok" and section_result.sections:
+        confidence_values.append(max(section.confidence for section in section_result.sections))
+    elif section_result is not None:
+        confidence_values.append(0.15)
 
     if not confidence_values:
         return 0.1
     return round(max(0.1, min(sum(confidence_values) / len(confidence_values), 0.8)), 6)
+
+
+def _select_semantic_section_result(
+    *,
+    section_backend: str,
+    section_backend_factory: SectionBackendFactory | None,
+    current_backend: Any,
+    audio: DecodedAudio,
+    context: AnalysisContext,
+    energy_features: EnergyFeatures,
+    tempo_features: TempoFeatures,
+    structure_features: StructureFeatures,
+    extra_warnings: tuple[str, ...] = (),
+) -> SectionCandidateResult:
+    fallback = current_backend.section_result_from_features(structure_features)
+    fallback_backend = fallback.provenance.backend_name
+    selected_name = section_backend.strip() or SELECTED_SECTION_BACKEND
+
+    if selected_name == fallback_backend:
+        return _with_section_warnings(fallback, extra_warnings)
+
+    beat_grid = current_backend.beat_grid_result_from_features(tempo_features)
+    features = FeatureBundle(energy=energy_features, extras={"tempoFeatures": tempo_features})
+    try:
+        backend = section_backend_factory() if section_backend_factory is not None else _default_section_backend(selected_name)
+    except Exception as exc:
+        return _with_section_warnings(
+            fallback,
+            (
+                *extra_warnings,
+                f"Selected semantic section backend '{selected_name}' could not be constructed; "
+                f"falling back to '{fallback_backend}' rough sections: {exc}",
+            ),
+        )
+
+    try:
+        result = backend.analyze_sections(audio, features, beat_grid, context)
+    except Exception as exc:
+        return _with_section_warnings(
+            fallback,
+            (
+                *extra_warnings,
+                f"Selected semantic section backend '{selected_name}' raised {type(exc).__name__}; "
+                f"falling back to '{fallback_backend}' rough sections: {exc}",
+            ),
+        )
+
+    if result.status == "ok" and result.sections:
+        return _with_section_warnings(result, extra_warnings)
+
+    reason = f"status={result.status}, sections={len(result.sections)}"
+    if result.error is not None:
+        reason = f"{reason}, error={result.error.message}"
+    return _with_section_warnings(
+        fallback,
+        (
+            *extra_warnings,
+            f"Selected semantic section backend '{selected_name}' did not produce usable sections "
+            f"({reason}); falling back to '{fallback_backend}' rough sections.",
+        ),
+    )
+
+
+def _default_section_backend(section_backend: str) -> SectionBackend:
+    if section_backend == DUBSTEP_PHRASE_HYBRID_BACKEND:
+        return DubstepPhraseHybridBackend()
+    if section_backend == CURRENT_SIGNAL_BACKEND:
+        from .backends.current_signal import CurrentSignalBackend
+
+        return CurrentSignalBackend()
+    raise ValueError(
+        "unsupported section backend "
+        f"'{section_backend}'; expected '{DUBSTEP_PHRASE_HYBRID_BACKEND}' or '{CURRENT_SIGNAL_BACKEND}'"
+    )
+
+
+def _with_section_warnings(
+    section_result: SectionCandidateResult,
+    warnings: tuple[str, ...],
+) -> SectionCandidateResult:
+    if not warnings:
+        return section_result
+    provenance = replace(
+        section_result.provenance,
+        warnings=tuple((*section_result.provenance.warnings, *warnings)),
+    )
+    return replace(section_result, provenance=provenance)
+
+
+def _write_section_analysis_audio(
+    audio: DecodedAudio,
+    temp_dir: Path | None,
+) -> tuple[Path, tuple[str, ...]]:
+    if temp_dir is None:
+        return audio.source_path, (
+            "Semantic section backend used the source audio file because no analysis work directory was provided.",
+        )
+
+    analysis_audio_path = temp_dir / "analysis.wav"
+    try:
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        from .dependencies import require_optional_dependency
+
+        soundfile = require_optional_dependency("soundfile", module_name="soundfile", install_extra="analysis")
+        soundfile.write(str(analysis_audio_path), audio.samples, audio.sample_rate)
+        return analysis_audio_path, ()
+    except Exception as exc:
+        return audio.source_path, (
+            "Could not write normalized analysis WAV for semantic section backend; "
+            f"using source audio file instead: {exc}",
+        )
 
 
 def _title(track: RepositoryTrack, probe: AudioProbe) -> str:

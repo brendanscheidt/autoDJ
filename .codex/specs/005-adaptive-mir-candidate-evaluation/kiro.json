@@ -1,0 +1,59 @@
+{
+  "id": "005-adaptive-mir-candidate-evaluation",
+  "title": "Adaptive MIR Candidate Evaluation",
+  "specStyle": "kiro-adaptive",
+  "status": "research-gated",
+  "sourceSpec": "../005-adaptive-mir-candidate-evaluation.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md",
+    "researchPlan": "research-plan.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/05-dubstep-dj-strategy.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "adaptiveGates": [
+    {
+      "id": "research-gate",
+      "description": "Complete the MIR and AutoDJ candidate research dossier before final implementation requirements are locked."
+    },
+    {
+      "id": "benchmark-gate",
+      "description": "Compare current and candidate backend outputs against Rekordbox XML ground truth before selecting winners."
+    },
+    {
+      "id": "manual-verdict-gate",
+      "description": "Stop for user review in the HTML viewer and/or Rekordbox before final backend selection is treated as complete."
+    }
+  ],
+  "subagentExecutionRules": [
+    "Before executing any task, read this kiro.json, requirements.md, design.md, tasks.md, research-plan.md, and all requiredSteeringContext files.",
+    "This spec is adaptive: do not invent final backend choices before the research, benchmark, and manual-verdict gates have produced evidence.",
+    "Use primary sources for research wherever possible: papers, official repositories, official docs, and model cards.",
+    "Record source URLs, publication dates when available, licenses, install requirements, compute costs, model sizes, platform constraints, and observed output quality.",
+    "Keep real songs, Rekordbox exports, generated analysis artifacts, and local benchmark results out of git unless a task explicitly creates sanitized documentation.",
+    "Treat Rekordbox XML as the current ground-truth reference for user-provided known songs, but final acceptance requires user judgment.",
+    "Place BPM, beatgrid, and section systems behind interfaces so candidate backends can be swapped with minimal orchestration changes.",
+    "The current BPM and beatgrid analyzer should be treated as a strong incumbent; replace it only with measured improvement or clear operational benefit.",
+    "The current heuristic section labeler should be treated as disposable; do not overfit or preserve it unless evidence shows value.",
+    "Stop at manual checkpoint tasks and ask the user to inspect outputs before continuing selection work.",
+    "Update tasks.md checkboxes only after completing and verifying the specific task."
+  ],
+  "verificationCommands": {
+    "wslAnalysisTest": "wsl -d Ubuntu-24.04 -- bash -lc \"cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && python -m pytest analysis/worker-python\"",
+    "viewerSyntax": "node --check <extracted tools/analysis-debug-viewer.html script>",
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug"
+  }
+}
+
