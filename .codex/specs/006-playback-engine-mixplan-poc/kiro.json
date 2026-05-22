@@ -1,0 +1,50 @@
+{
+  "id": "006-playback-engine-mixplan-poc",
+  "title": "Playback Engine And MixPlan POC",
+  "specStyle": "kiro-implementation",
+  "status": "draft",
+  "sourceSpec": "../006-playback-engine-mixplan-poc.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/05-dubstep-dj-strategy.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "decisionGates": [
+    {
+      "id": "audition-target-gate",
+      "description": "Confirm whether Spec 006 must produce audible realtime desktop playback, offline rendered audio, or a deterministic command-plan simulator first."
+    },
+    {
+      "id": "manual-audition-gate",
+      "description": "Stop after generating first transition artifacts and ask the user to audition them before expanding strategy behavior."
+    }
+  ],
+  "subagentExecutionRules": [
+    "Before executing any task, read this kiro.json, requirements.md, design.md, tasks.md, and all requiredSteeringContext files.",
+    "Treat current-autodj-signal BPM/beatgrid as fixed input. Prefer Rekordbox XML semantic labels when available; treat dubstep-phrase-hybrid as an experimental/fallback semantic provider.",
+    "Do not re-open MIR candidate selection or section-threshold tuning unless a task explicitly says to do so.",
+    "Keep real audio, rendered mixes, local analysis artifacts, and generated audition files out of git.",
+    "Prefer deterministic plan generation and testable scheduling before adding complex UI behavior.",
+    "Every generated transition must include debug annotations describing chosen sections, measure counts, cue points, and fallback reasons.",
+    "Stop at manual audition checkpoints and record the user's listening verdict before marking the checkpoint complete.",
+    "Update tasks.md checkboxes only after completing and verifying the specific task."
+  ],
+  "verificationCommands": {
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug",
+    "wslAnalysisTest": "wsl -d Ubuntu-24.04 -- bash -lc \"cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && python -m pytest analysis/worker-python\"",
+    "contractValidation": "ctest --preset debug -R autodj_contract_examples --output-on-failure"
+  }
+}

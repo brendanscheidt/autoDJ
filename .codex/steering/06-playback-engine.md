@@ -38,6 +38,8 @@ Controls:
 - `eqHigh`
 - `filter`
 - `reverbWet`
+- `reverbTailGain`
+- `reverbDecaySeconds`
 - `echoWet`
 - `tempo`
 - `crossfader`
@@ -60,6 +62,10 @@ AudioSource
 ```
 
 The exact order can evolve, but automation semantics should remain stable.
+For CDJ-style exits, reverb must support post-fader tail behavior: dry deck
+volume may cut to zero while the already-fed reverb return continues to decay.
+Reverb quality is still POC-level; authored recipes and rendered auditions are
+the source of truth for tuning.
 
 ## Automation
 
@@ -135,7 +141,8 @@ mobile assumption.
 
 The MVP can start with conservative tempo behavior:
 
-- Prefer transitions between tracks with nearly matching normalized BPM.
+- Require exact normalized BPM equality for second-build drop switches.
+- Prefer simple reverb/hard-cut exits when normalized BPM differs.
 - Avoid aggressive stretching until a proper backend is integrated.
 - Store desired deck `tempo` automation in the plan even if the backend is
   initially limited.
@@ -195,4 +202,3 @@ Later audio quality tests should include:
 - Compare timing of impulses against expected sample positions.
 - Verify loop boundaries remain stable.
 - Verify automation reaches expected values at expected times.
-

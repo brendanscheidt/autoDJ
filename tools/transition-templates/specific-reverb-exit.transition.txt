@@ -1,0 +1,32 @@
+# Copy this file when you design one exact reverb-exit transition in Rekordbox.
+# The first beat in each analyzed beatgrid is bar 1.1.
+# The parser aligns song_b.first_beat with song_a.drop_end.
+
+kind: specific_transition
+type: reverb_exit
+plan_id: manual-reverb-exit-example
+transition_id: manual-reverb-exit-example
+bpm: 150
+tail_seconds: 14
+notes: Describe why this exact reverb exit sounded good.
+
+song_a.track_id: song-a
+song_a.file: C:/Path/To/Song A.mp3
+song_a.play_from: 1.1
+song_a.reverb_start: 52.3
+song_a.drop_end: 53.1
+song_a.end_at: 53.1
+
+song_b.track_id: song-b
+song_b.file: C:/Path/To/Song B.mp3
+song_b.play_from: 1.1
+song_b.first_beat: 1.1
+song_b.end_at: 33.1
+
+action: a.reverbWet at 52.3 = 1 straight
+action: a.reverbTailGain at 53.1 = 1 instant
+action: a.volume at 53.1 = 0 instant
+action: b.volume at 1.1 = 1 instant
+action: b.eqLow at 1.1 = 1 instant
+# This action controls deck A, but the time is referenced to deck B reaching bar 9.1.
+action: a.reverbTailGain at b:9.1 = 0 smooth

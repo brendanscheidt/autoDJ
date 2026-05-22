@@ -8,10 +8,14 @@ import copy
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any
 import xml.etree.ElementTree as ET
+from urllib.parse import quote, urlparse
+import zlib
 
 from .cache import write_json_atomic
+from .semantic_cues import boundaries_from_named_cues, sections_and_cue_points_from_boundaries
 from .tempo import normalize_dubstep_bpm
 
 
@@ -19,6 +23,7 @@ REKORDBOX_XML_BACKEND = "rekordbox.xml"
 REKORDBOX_OVERRIDE_WARNING = (
     "Tempo, beat grid, sections, and cue points were overridden from Rekordbox XML metadata."
 )
+REKORDBOX_EXPORT_PRODUCT_VERSION = "7.2.11"
 
 
 class RekordboxXmlError(ValueError):
@@ -152,7 +157,7 @@ def apply_rekordbox_overrides(
         "downbeats": [],
         "confidence": 1.0,
     }
-    sections, cue_points = _sections_and_cues_from_rekordbox(rekordbox_track, tempo)
+    sections, cue_points = _sections_and_cues_from_rekordbox(rekordbox_track, tempo, duration_seconds)
     artifact["sections"] = sections
     artifact["cuePoints"] = cue_points
 
@@ -202,6 +207,146 @@ def apply_rekordbox_xml_file(
     return write_json_atomic(output_path, artifact)
 
 
+def export_analyzed_track_to_rekordbox_xml_file(
+    analyzed_path: str | Path,
+    output_path: str | Path,
+    *,
+    source_uri: str | None = None,
+    track_name: str | None = None,
+    include_cue_points: bool = False,
+    cue_policy: str = "transition-8",
+    max_hot_cues: int = 8,
+    time_precision: int = 3,
+) -> Path:
+    """Export AutoDJ analyzed-track timing/section metadata as Rekordbox XML."""
+
+    try:
+        artifact = json.loads(Path(analyzed_path).read_text(encoding="utf-8-sig"))
+    except OSError as exc:
+        raise RekordboxXmlError("analyzed_artifact_read_error", f"Could not read analyzed artifact: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise RekordboxXmlError("analyzed_artifact_parse_error", f"Could not parse analyzed artifact JSON: {exc}") from exc
+    if not isinstance(artifact, dict):
+        raise RekordboxXmlError("analyzed_artifact_invalid", "Analyzed artifact root must be a JSON object")
+
+    xml_text = build_rekordbox_xml_from_analyzed_track(
+        artifact,
+        source_uri=source_uri,
+        track_name=track_name,
+        include_cue_points=include_cue_points,
+        cue_policy=cue_policy,
+        max_hot_cues=max_hot_cues,
+        time_precision=time_precision,
+    )
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(xml_text, encoding="utf-8")
+    return output
+
+
+def build_rekordbox_xml_from_analyzed_track(
+    artifact: dict[str, Any],
+    *,
+    source_uri: str | None = None,
+    track_name: str | None = None,
+    include_cue_points: bool = False,
+    cue_policy: str = "transition-8",
+    max_hot_cues: int = 8,
+    time_precision: int = 3,
+) -> str:
+    """Build a one-track Rekordbox XML document from an analyzed-track artifact."""
+
+    if max_hot_cues <= 0:
+        raise RekordboxXmlError("invalid_max_hot_cues", "max_hot_cues must be greater than zero")
+    if time_precision < 0 or time_precision > 6:
+        raise RekordboxXmlError("invalid_time_precision", "time_precision must be between 0 and 6")
+
+    track_id = _string_or_default(artifact.get("trackId"), "autodj-track")
+    name = track_name or _string_or_default(artifact.get("title"), track_id)
+    tempo = artifact.get("tempo") if isinstance(artifact.get("tempo"), dict) else {}
+    bpm = _positive_float(tempo.get("normalizedBpm")) or _positive_float(tempo.get("bpm"))
+    if bpm is None:
+        raise RekordboxXmlError("missing_tempo", "Analyzed artifact has no positive tempo bpm")
+
+    duration_seconds = _positive_float(artifact.get("durationSeconds")) or _duration_from_artifact_boundaries(artifact)
+    first_beat = _first_beat_seconds(artifact)
+    location = _rekordbox_location(source_uri or _source_uri_from_artifact(artifact) or f"{track_id}.mp3")
+    format_hint = _format_hint_from_uri(location)
+
+    root = ET.Element("DJ_PLAYLISTS", {"Version": "1.0.0"})
+    ET.SubElement(
+        root,
+        "PRODUCT",
+        {"Name": "rekordbox", "Version": REKORDBOX_EXPORT_PRODUCT_VERSION, "Company": "AlphaTheta"},
+    )
+    collection = ET.SubElement(root, "COLLECTION", {"Entries": "1"})
+    track = ET.SubElement(
+        collection,
+        "TRACK",
+        {
+            "TrackID": str(_stable_track_id(track_id)),
+            "Name": name,
+            "Artist": _string_or_default(artifact.get("artist"), ""),
+            "Composer": "",
+            "Album": _string_or_default(artifact.get("album"), ""),
+            "Grouping": "",
+            "Genre": _string_or_default(artifact.get("genre"), ""),
+            "Kind": _kind_from_format(format_hint),
+            "Size": "0",
+            "TotalTime": str(max(0, round(duration_seconds))),
+            "DiscNumber": "0",
+            "TrackNumber": "0",
+            "Year": "0",
+            "AverageBpm": _format_decimal(bpm, 2),
+            "DateAdded": datetime.now(UTC).date().isoformat(),
+            "BitRate": "0",
+            "SampleRate": "0",
+            "Comments": "AutoDJ analyzed-track export",
+            "PlayCount": "0",
+            "Rating": "0",
+            "Location": location,
+            "Remixer": "",
+            "Tonality": "",
+            "Label": "",
+            "Mix": "",
+        },
+    )
+    ET.SubElement(
+        track,
+        "TEMPO",
+        {
+            "Inizio": _format_decimal(first_beat, time_precision),
+            "Bpm": _format_decimal(bpm, 2),
+            "Metro": "4/4",
+            "Battito": "1",
+        },
+    )
+
+    marks = _position_marks_from_artifact(
+        artifact,
+        include_cue_points=include_cue_points,
+        cue_policy=cue_policy,
+        max_hot_cues=max_hot_cues,
+    )
+    for index, mark in enumerate(marks):
+        attrs = {
+            "Name": mark["name"],
+            "Type": "0",
+            "Start": _format_decimal(mark["start"], time_precision),
+            "Num": str(index),
+            "Red": str(mark["color"]["red"]),
+            "Green": str(mark["color"]["green"]),
+            "Blue": str(mark["color"]["blue"]),
+        }
+        ET.SubElement(track, "POSITION_MARK", attrs)
+
+    playlists = ET.SubElement(root, "PLAYLISTS")
+    root_node = ET.SubElement(playlists, "NODE", {"Type": "0", "Name": "ROOT", "Count": "1"})
+    ET.SubElement(root_node, "NODE", {"Name": "AutoDJ Export", "Type": "1", "KeyType": "0", "Entries": "0"})
+    ET.indent(root, space="  ")
+    return '<?xml version="1.0" encoding="UTF-8"?>\n\n' + ET.tostring(root, encoding="unicode") + "\n"
+
+
 def _parse_tempo(element: ET.Element) -> RekordboxTempo:
     return RekordboxTempo(
         start_seconds=_required_float(element, "Inizio", "TEMPO"),
@@ -241,7 +386,17 @@ def _build_rekordbox_beats(tempo: RekordboxTempo, duration_seconds: float) -> li
 def _sections_and_cues_from_rekordbox(
     rekordbox_track: RekordboxTrack,
     tempo: RekordboxTempo,
+    duration_seconds: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    named_boundaries = boundaries_from_named_cues(rekordbox_track.cues, provider_name="rekordbox")
+    if named_boundaries:
+        return sections_and_cue_points_from_boundaries(
+            named_boundaries,
+            duration_seconds=duration_seconds,
+            provider_name=REKORDBOX_XML_BACKEND,
+            beat_index_for_time=lambda seconds: _beat_index(seconds, tempo),
+        )
+
     cues = list(rekordbox_track.cues)
     sections: list[dict[str, Any]] = []
     cue_points: list[dict[str, Any]] = []
@@ -346,3 +501,224 @@ def _round_float(value: float) -> float:
     if rounded == 0:
         return 0.0
     return rounded
+
+
+def _position_marks_from_artifact(
+    artifact: dict[str, Any],
+    *,
+    include_cue_points: bool,
+    cue_policy: str,
+    max_hot_cues: int,
+) -> list[dict[str, Any]]:
+    marks: list[dict[str, Any]] = []
+    section_counts: dict[str, int] = {}
+    seen: set[tuple[str, float]] = set()
+    for section in artifact.get("sections", []):
+        if not isinstance(section, dict):
+            continue
+        section_type = _string_or_default(section.get("type"), "section")
+        section_counts[section_type] = section_counts.get(section_type, 0) + 1
+        ordinal = section_counts[section_type]
+        start = _positive_or_zero_float(section.get("startSeconds"))
+        end = _positive_or_zero_float(section.get("endSeconds"))
+        if start is not None:
+            _add_mark(
+                marks,
+                seen,
+                name=f"{section_type}_{ordinal}_start",
+                start=start,
+                color=_color_for_section(section_type),
+            )
+        if end is not None and start is not None and end > start:
+            _add_mark(
+                marks,
+                seen,
+                name=f"{section_type}_{ordinal}_end",
+                start=end,
+                color=_darker_color(_color_for_section(section_type)),
+            )
+
+    if include_cue_points:
+        cue_counts: dict[str, int] = {}
+        for cue in artifact.get("cuePoints", []):
+            if not isinstance(cue, dict):
+                continue
+            cue_type = _string_or_default(cue.get("type"), "cue")
+            cue_counts[cue_type] = cue_counts.get(cue_type, 0) + 1
+            start = _positive_or_zero_float(cue.get("timeSeconds"))
+            if start is None:
+                continue
+            _add_mark(
+                marks,
+                seen,
+                name=_string_or_default(cue.get("name"), f"cue_{cue_type}_{cue_counts[cue_type]}"),
+                start=start,
+                color=_color_for_section(cue_type),
+            )
+    marks = sorted(marks, key=lambda mark: (mark["start"], mark["name"]))
+    if cue_policy == "all":
+        return marks
+    if cue_policy == "transition-8":
+        return _select_transition_hot_cues(marks, max_hot_cues)
+    raise RekordboxXmlError(
+        "invalid_cue_policy",
+        "cue_policy must be 'transition-8' or 'all'",
+    )
+
+
+def _select_transition_hot_cues(marks: list[dict[str, Any]], max_hot_cues: int) -> list[dict[str, Any]]:
+    selected = sorted(
+        marks,
+        key=lambda mark: (-_transition_hotcue_priority(str(mark["name"])), float(mark["start"]), str(mark["name"])),
+    )[:max_hot_cues]
+    return sorted(selected, key=lambda mark: (float(mark["start"]), str(mark["name"])))
+
+
+def _transition_hotcue_priority(name: str) -> int:
+    match = re.match(r"^(?P<section>[a-z_]+)_(?P<number>\d+)_(?P<edge>start|end)$", name)
+    if not match:
+        return 0
+    section = match.group("section")
+    number = int(match.group("number"))
+    edge = match.group("edge")
+    if section == "drop" and edge == "start":
+        return 300 - number
+    if section == "build" and edge == "start":
+        return 260 - number
+    if section == "drop" and edge == "end":
+        return 240 - number
+    if section == "break" and edge == "start":
+        return 130 - number
+    if section == "outro" and edge == "start":
+        return 120 - number
+    if section == "intro" and edge == "start":
+        return 80 - number
+    return 10
+
+
+def _add_mark(
+    marks: list[dict[str, Any]],
+    seen: set[tuple[str, float]],
+    *,
+    name: str,
+    start: float,
+    color: dict[str, int],
+) -> None:
+    key = (name, round(start, 3))
+    if key in seen:
+        return
+    seen.add(key)
+    marks.append({"name": name, "start": start, "color": color})
+
+
+def _color_for_section(section_type: str) -> dict[str, int]:
+    colors = {
+        "intro": {"red": 90, "green": 160, "blue": 255},
+        "verse": {"red": 69, "green": 172, "blue": 219},
+        "break": {"red": 125, "green": 193, "blue": 61},
+        "build": {"red": 255, "green": 194, "blue": 66},
+        "drop": {"red": 255, "green": 55, "blue": 111},
+        "outro": {"red": 170, "green": 114, "blue": 255},
+        "mix_out": {"red": 170, "green": 114, "blue": 255},
+    }
+    return dict(colors.get(section_type, {"red": 210, "green": 210, "blue": 210}))
+
+
+def _darker_color(color: dict[str, int]) -> dict[str, int]:
+    return {channel: max(0, round(value * 0.7)) for channel, value in color.items()}
+
+
+def _first_beat_seconds(artifact: dict[str, Any]) -> float:
+    beat_grid = artifact.get("beatGrid") if isinstance(artifact.get("beatGrid"), dict) else {}
+    beats = beat_grid.get("beats") if isinstance(beat_grid.get("beats"), list) else []
+    for beat in beats:
+        if isinstance(beat, dict):
+            value = _positive_or_zero_float(beat.get("timeSeconds"))
+            if value is not None:
+                return value
+    return 0.0
+
+
+def _duration_from_artifact_boundaries(artifact: dict[str, Any]) -> float:
+    values: list[float] = []
+    for field in ("sections", "cuePoints"):
+        for item in artifact.get(field, []):
+            if not isinstance(item, dict):
+                continue
+            for key in ("startSeconds", "endSeconds", "timeSeconds"):
+                value = _positive_or_zero_float(item.get(key))
+                if value is not None:
+                    values.append(value)
+    return max(values, default=0.0)
+
+
+def _source_uri_from_artifact(artifact: dict[str, Any]) -> str | None:
+    source = artifact.get("source")
+    if not isinstance(source, dict):
+        return None
+    for key in ("sourceUri", "uri", "path"):
+        value = source.get(key)
+        if isinstance(value, str) and value:
+            return value
+    provider = source.get("providerMetadata")
+    if isinstance(provider, dict):
+        value = provider.get("sourceUri")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _rekordbox_location(source_uri: str) -> str:
+    if source_uri.startswith("file://"):
+        return source_uri
+    normalized = source_uri.replace("\\", "/")
+    if normalized.startswith("/mnt/") and len(normalized) > 6 and normalized[5].isalpha() and normalized[6] == "/":
+        normalized = f"{normalized[5].upper()}:{normalized[6:]}"
+    if len(normalized) > 2 and normalized[1] == ":":
+        return "file://localhost/" + quote(normalized, safe="/:")
+    path = Path(source_uri)
+    if path.is_absolute():
+        return path.as_uri()
+    return "file://localhost/" + quote(normalized, safe="/:")
+
+
+def _format_hint_from_uri(source_uri: str) -> str:
+    parsed = urlparse(source_uri)
+    suffix = Path(parsed.path).suffix.lstrip(".").lower()
+    return suffix or "unknown"
+
+
+def _kind_from_format(format_hint: str) -> str:
+    labels = {
+        "mp3": "MP3 File",
+        "wav": "WAV File",
+        "flac": "FLAC File",
+        "aiff": "AIFF File",
+        "aif": "AIFF File",
+        "m4a": "M4A File",
+    }
+    return labels.get(format_hint.lower(), "Audio File")
+
+
+def _stable_track_id(track_id: str) -> int:
+    return zlib.crc32(track_id.encode("utf-8")) & 0x7FFFFFFF
+
+
+def _format_decimal(value: float, digits: int) -> str:
+    return f"{float(value):.{digits}f}"
+
+
+def _string_or_default(value: Any, default: str) -> str:
+    return value if isinstance(value, str) and value else default
+
+
+def _positive_float(value: Any) -> float | None:
+    if isinstance(value, int | float) and float(value) > 0.0:
+        return float(value)
+    return None
+
+
+def _positive_or_zero_float(value: Any) -> float | None:
+    if isinstance(value, int | float) and float(value) >= 0.0:
+        return float(value)
+    return None

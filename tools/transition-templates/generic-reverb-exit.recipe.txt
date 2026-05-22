@@ -1,0 +1,21 @@
+# Copy this file when you discover a reusable reverb/echo exit technique.
+# Generic recipes keep semantic anchors and expressions instead of exact song timestamps.
+
+kind: generic_transition
+type: reverb_exit
+recipe_id: manual-reverb-exit-v1
+notes: Use when song A has no usable second build/drop for a drop switch.
+require: song_a.drop_end
+require: song_b.first_beat
+
+anchor: a_reverb_start = song_a.drop_end - 2 beats
+anchor: a_drop_end = song_a.drop_end
+anchor: b_first = song_b.first_beat
+anchor: tail_end = b_first + 8 bars
+
+action: a.reverbWet at a_reverb_start = 1 straight
+action: a.reverbTailGain at a_drop_end = 1 instant
+action: a.volume at a_drop_end = 0 instant
+action: b.volume at b_first = 1 instant
+action: b.eqLow at b_first = 1 instant
+action: a.reverbTailGain at tail_end = 0 smooth

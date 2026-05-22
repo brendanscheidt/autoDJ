@@ -35,6 +35,12 @@
         "$ref": "#/$defs/trackPlacement"
       }
     },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trackAssetReference"
+      }
+    },
     "transitions": {
       "type": "array",
       "items": {
@@ -82,6 +88,39 @@
         },
         "randomSeed": {
           "type": "string"
+        }
+      }
+    },
+    "trackAssetReference": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "trackId",
+        "sourceUri"
+      ],
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "formatHint": {
+          "enum": [
+            "wav",
+            "mp3",
+            "flac",
+            "aiff",
+            "unknown"
+          ]
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "durationSeconds": {
+          "$ref": "#/$defs/timeSeconds"
         }
       }
     },
@@ -161,6 +200,7 @@
           "enum": [
             "intro_outro_blend",
             "build_to_drop_swap",
+            "drop_end_reverb_exit",
             "drop_double",
             "loop_tighten",
             "vocal_over_instrumental",
@@ -188,6 +228,55 @@
           "items": {
             "type": "string"
           }
+        },
+        "templateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "measureCountToTarget": {
+          "type": "number",
+          "minimum": 0
+        },
+        "alignedDropTimelineSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "handoffTimelineSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "sourceAnchors": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/transitionAnchor"
+          }
+        }
+      }
+    },
+    "transitionAnchor": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cueId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceSeconds": {
+          "$ref": "#/$defs/timeSeconds"
+        },
+        "beatIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "measureIndex": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -398,10 +487,31 @@
             "eqHigh",
             "filter",
             "reverbWet",
+            "reverbTailGain",
+            "reverbDecaySeconds",
             "echoWet",
             "tempo",
             "crossfader"
           ]
+        },
+        "postFader": {
+          "type": "boolean"
+        },
+        "effectParameters": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          }
         },
         "keyframes": {
           "type": "array",

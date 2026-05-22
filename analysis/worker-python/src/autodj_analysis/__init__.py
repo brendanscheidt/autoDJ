@@ -102,6 +102,13 @@ from .section_labels import (
     map_section_label,
     normalize_section_label,
 )
+from .semantic_cues import (
+    ParsedSemanticCueLabel,
+    SemanticCueBoundary,
+    boundaries_from_named_cues,
+    parse_semantic_cue_label,
+    sections_and_cue_points_from_boundaries,
+)
 from .evaluation import (
     DEFAULT_SEMANTIC_ANALYSIS_SAMPLE_RATE,
     DEFAULT_SEMANTIC_CANDIDATES,
@@ -171,8 +178,17 @@ from .rekordbox_xml import (
     RekordboxXmlError,
     apply_rekordbox_overrides,
     apply_rekordbox_xml_file,
+    build_rekordbox_xml_from_analyzed_track,
+    export_analyzed_track_to_rekordbox_xml_file,
     load_rekordbox_track,
     load_rekordbox_tracks,
+)
+from .transition_template import (
+    TransitionTemplateError,
+    TransitionTemplateResult,
+    build_mix_plan_from_template,
+    build_recipe_from_template,
+    parse_transition_template_file,
 )
 from .structure import (
     DEFAULT_CUE_SNAP_SECONDS,
@@ -307,6 +323,11 @@ __all__ = [
     "SectionMappingEvidence",
     "map_section_label",
     "normalize_section_label",
+    "ParsedSemanticCueLabel",
+    "SemanticCueBoundary",
+    "boundaries_from_named_cues",
+    "parse_semantic_cue_label",
+    "sections_and_cue_points_from_boundaries",
     "REKORDBOX_EVALUATION_REPORT_TYPE",
     "SEMANTIC_BENCHMARK_REPORT_TYPE",
     "TIMING_BENCHMARK_REPORT_TYPE",
@@ -368,8 +389,15 @@ __all__ = [
     "RekordboxXmlError",
     "apply_rekordbox_overrides",
     "apply_rekordbox_xml_file",
+    "build_rekordbox_xml_from_analyzed_track",
+    "export_analyzed_track_to_rekordbox_xml_file",
     "load_rekordbox_track",
     "load_rekordbox_tracks",
+    "TransitionTemplateError",
+    "TransitionTemplateResult",
+    "build_mix_plan_from_template",
+    "build_recipe_from_template",
+    "parse_transition_template_file",
     "resolve_source_path",
     "DEFAULT_CUE_SNAP_SECONDS",
     "DEFAULT_HIGH_ENERGY_THRESHOLD",

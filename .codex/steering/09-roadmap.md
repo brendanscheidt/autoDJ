@@ -71,8 +71,11 @@ Target: 1 to 2 weeks.
 Spec 005 status:
 
 - BPM/beatgrid selected path is `current-autodj-signal`.
-- Semantic section selected path is `dubstep-phrase-hybrid`, with
+- Automatic semantic section best candidate is `dubstep-phrase-hybrid`, with
   `current-autodj-signal` rough sections retained only as fallback.
+- Manual Rekordbox XML cue labels are now the trusted POC semantic oracle for
+  transition planning until a trained drop-start model reaches acceptance
+  accuracy.
 - Deferred MIR/provider/stem/native candidates are cataloged in
   `.codex/specs/005-adaptive-mir-candidate-evaluation/deferred-candidates-and-future-specs.md`.
 
@@ -83,6 +86,7 @@ Deliverables:
   they materially improve output quality.
 - Selected BPM/beatgrid artifact path using `current-autodj-signal`.
 - Selected section artifact path using `dubstep-phrase-hybrid`.
+- Rekordbox XML import/export path for manually labeled semantic cues.
 - Comparison/deferred timing candidates documented for later reference:
   Essentia, Beat This, All-In-One timing, BeatNet, madmom, aubio, Vamp/QM, and
   Superpowered.
@@ -125,6 +129,14 @@ Success:
 
 ## Phase 4: Playback Engine Skeleton
 
+Status:
+
+- Spec 006 implemented a C++ MixPlan parser/validator, deterministic scheduler,
+  two MVP transition templates, a Python offline renderer, transient nudging,
+  and drop-switch energy/gain planning for audition artifacts.
+- Spec 007 implemented the first native JUCE transition authoring workbench for
+  two-deck inspection, automation editing, and session/MixPlan/recipe export.
+
 Target: 1 to 2 weeks.
 
 Deliverables:
@@ -147,6 +159,15 @@ Success:
 ## Phase 5: First Dubstep MixPlan Generator
 
 Target: 1 to 2 weeks.
+
+Current direction:
+
+- Use Rekordbox-labeled `AnalyzedTrack` artifacts as the semantic input.
+- Use exact normalized BPM matches for drop switches.
+- Use reverb exits or simpler cuts when BPM or semantic confidence does not
+  support a drop switch.
+- Keep automatic semantic detection as a replaceable provider rather than a
+  blocker for transition-intelligence work.
 
 Deliverables:
 
@@ -206,15 +227,23 @@ Target: ongoing.
 
 Deliverables:
 
-- Confidence calibration and regression cleanup for `dubstep-phrase-hybrid`.
-- Improved drop/build/break detection only after real transition failures show
-  where the selected backend is insufficient.
+- A supervised drop-start dataset/training loop using Rekordbox-labeled XML as
+  ground truth.
+- Candidate-feature extraction from current heuristics, All-In-One/SongFormer
+  boundaries, CUE-DETR/EDM-98 research outputs, beat-aligned mel/bass/onset
+  features, and manual corrections.
+- Strict holdout evaluation by song. Random beat-level splits are not
+  acceptable.
+- Confidence calibration and regression cleanup for `dubstep-phrase-hybrid`
+  only if it remains useful as a candidate source.
 - UI correction tools for section/cue errors.
 - Regression fixtures from bad analysis cases.
 
 Success:
 
-- Strategy errors increasingly come from musical taste, not bad metadata.
+- Trained drop-start recognition reaches an acceptance threshold high enough to
+  replace Rekordbox labels for most tracks. Until then, Rekordbox labels remain
+  the trusted oracle.
 
 ## Phase 9: Mobile Feasibility Prototype
 

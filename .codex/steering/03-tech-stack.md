@@ -13,7 +13,8 @@ Time-stretch/pitch-shift:     Abstract interface; evaluate Superpowered/Rubber B
 Analysis POC worker:          Python 3.11 in WSL for the full MIR stack;
                                lightweight Windows Python for dev/test only
 Selected timing backend:      current-autodj-signal
-Selected section backend:     dubstep-phrase-hybrid
+Trusted POC semantic source:  Rekordbox XML hot-cue labels
+Experimental section backend: dubstep-phrase-hybrid
 Analysis POC libraries:       librosa/soundfile/audioread/scipy/numpy baseline;
                                All-In-One and SongFormer for semantic evidence;
                                Essentia, Beat This, and other MIR tools as
@@ -144,18 +145,20 @@ The C++ app can invoke the worker or consume artifacts generated externally.
 Use Python 3.11 in WSL for the full analysis environment. Some MIR libraries lag
 newest Python versions, so do not jump to 3.12+ until dependency compatibility
 is verified. Windows Python can run lightweight tests and rough-section smoke
-paths, but the selected semantic backend should be treated as WSL/Linux POC
-runtime unless a later packaging task proves otherwise.
+paths. Heavy semantic candidate backends should be treated as WSL/Linux
+research runtimes unless a later packaging task proves otherwise.
 
 Current selected analysis stack:
 
 - BPM/beatgrid: `current-autodj-signal`, the project-owned electronic-music
   timing stack.
-- Semantic sections: `dubstep-phrase-hybrid`, which fuses All-In-One and
-  SongFormer boundary evidence with selected beatgrid/energy/bass/onset
-  features and dubstep phrase heuristics.
-- Fallback: `current-autodj-signal` rough sections only if the selected section
-  backend cannot run or emits no usable sections.
+- Trusted POC semantic source: Rekordbox XML hot-cue labels normalized into the
+  `AnalyzedTrack` section/cue contract.
+- Experimental automatic sections: `dubstep-phrase-hybrid`, which fuses
+  All-In-One and SongFormer boundary evidence with selected
+  beatgrid/energy/bass/onset features and dubstep phrase heuristics.
+- Fallback: `current-autodj-signal` rough sections only when the caller accepts
+  low-confidence automatic sections.
 
 Current full WSL extras:
 
@@ -163,7 +166,7 @@ Current full WSL extras:
 analysis-wsl, all-in-one, songformer
 ```
 
-The selected semantic path pulls in PyTorch/Torchaudio, TorchCodec, NATTEN,
+The experimental semantic path pulls in PyTorch/Torchaudio, TorchCodec, NATTEN,
 Demucs, CPJKU madmom, Transformers 4.51.x, Hugging Face Hub 0.30.x, MuQ, MSAF,
 and related model/runtime packages. Keep those optional and isolated from
 package import; missing heavy dependencies should produce structured
@@ -200,8 +203,8 @@ timing without a new benchmark and manual user verdict.
 
 ### dubstep-phrase-hybrid
 
-Use `dubstep-phrase-hybrid` as the selected semantic section backend for the
-POC.
+Use `dubstep-phrase-hybrid` as the best current automatic semantic section
+candidate, not as the trusted transition-planning oracle.
 
 Why:
 
@@ -219,6 +222,8 @@ Runtime caveats:
   commercial distribution.
 - Long dense tracks, light/non-standard dubstep, and long inter-drop breaks are
   known failure classes; transition planning should stay confidence-aware.
+- Manual Rekordbox XML labels should override this backend when available for
+  audition-quality set planning.
 
 ## Essentia
 
@@ -294,10 +299,10 @@ Candidates:
   implementation and broad transform/feature support.
 - pyAudioAnalysis: Apache-licensed feature extraction, classification, and
   segmentation library; useful as a comparison baseline.
-- All-In-One: joint timing/functional section model. It is part of the selected
-  section backend as a boundary evidence source, but not selected for timing.
-- SongFormer: semantic section model. It is part of the selected section backend
-  as a boundary evidence source.
+- All-In-One: joint timing/functional section model. It remains useful as an
+  automatic section-boundary evidence source, but is not selected for timing.
+- SongFormer: semantic section model. It remains useful as an automatic
+  section-boundary evidence source.
 - torchaudio: PyTorch audio/signal processing and feature extraction; needed by
   several ML candidates.
 - Basic Pitch: Apache-licensed audio-to-MIDI/pitch transcription from Spotify;
@@ -486,8 +491,9 @@ Likely for MVP:
 - librosa.
 - soundfile/audioread/scipy/numpy analysis baseline.
 - current-autodj-signal timing.
-- dubstep-phrase-hybrid sections in WSL.
-- All-In-One and SongFormer as selected-section evidence providers.
+- Rekordbox XML semantic labels for current planning/audition truth.
+- dubstep-phrase-hybrid sections in WSL as automatic candidate/fallback output.
+- All-In-One and SongFormer as automatic-section evidence providers.
 - Essentia, Beat This, and other candidates as explicit comparison/deferred
   paths only.
 - mir_eval or equivalent metrics for analysis quality evaluation.

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "1.0.0",
+  "sessionId": "session-transition-authoring-stub",
+  "createdAtUtc": "2026-05-20T00:00:00Z",
+  "transitionFamily": "drop_switch",
+  "notes": "Stub transition authoring session.",
+  "decks": [
+    {
+      "deck": "a",
+      "trackId": "stub-song-a",
+      "audioPath": "fixtures/audio/stub-song-a.mp3",
+      "analyzedTrackPath": "fixtures/analysis/stub-song-a/analyzed-track.json",
+      "debugWaveformPath": "fixtures/analysis/stub-song-a/debug-waveform.json",
+      "centerSeconds": 64,
+      "zoomSeconds": 16
+    },
+    {
+      "deck": "b",
+      "trackId": "stub-song-b",
+      "audioPath": "fixtures/audio/stub-song-b.mp3",
+      "analyzedTrackPath": "fixtures/analysis/stub-song-b/analyzed-track.json",
+      "debugWaveformPath": "fixtures/analysis/stub-song-b/debug-waveform.json",
+      "centerSeconds": 32,
+      "zoomSeconds": 16
+    }
+  ],
+  "anchors": [
+    {
+      "name": "a.dropStart",
+      "deck": "a",
+      "sourceSeconds": 64,
+      "barBeat": "41.1"
+    },
+    {
+      "name": "b.dropStart",
+      "deck": "b",
+      "sourceSeconds": 32,
+      "barBeat": "17.1"
+    }
+  ],
+  "lanes": [
+    {
+      "deck": "b",
+      "control": "volume",
+      "keyframes": [
+        {
+          "sourceSeconds": 16,
+          "value": 0,
+          "interpolation": "hold"
+        },
+        {
+          "sourceSeconds": 24,
+          "value": 1,
+          "interpolation": "smoothstep"
+        }
+      ]
+    }
+  ]
+}
