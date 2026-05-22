@@ -1,14 +1,16 @@
 # Large Set Semantic Benchmark Runbook
 
-This runbook is for testing the selected semantic-section backend against a
-larger Rekordbox export without asking Codex to run the expensive model pass.
+This runbook is for testing the experimental automatic semantic-section backend
+against a larger Rekordbox export without asking Codex to run the expensive
+model pass.
 Run these commands yourself in a new PowerShell terminal.
 
-As of task 16, `dubstep-phrase-hybrid` is also the default semantic section
-backend for normal `autodj-analysis analyze-batch` artifact generation. This
-runbook still uses `autodj-analysis benchmark-sections` because it produces the
-extra Rekordbox comparison report, `debug-waveform.json`, and copied
-`source-audio.mp3` files that make manual viewer inspection easier.
+As of the post-Spec-006 cleanup, Rekordbox XML hot-cue labels are the trusted
+POC semantic oracle for transition planning. `dubstep-phrase-hybrid` remains a
+local automatic candidate/fallback backend. This runbook still uses
+`autodj-analysis benchmark-sections` because it produces the extra Rekordbox
+comparison report, `debug-waveform.json`, and copied `source-audio.mp3` files
+that make manual viewer inspection easier.
 
 The benchmark does not call OpenAI or any paid API. It runs local WSL/Python
 analysis, All-In-One, and SongFormer from the `.venv-analysis` environment.
@@ -17,8 +19,8 @@ spending Codex interaction credits on a long model job.
 
 ## Current Algorithm Notes
 
-The selected/default semantic backend is `dubstep-phrase-hybrid`. As of the
-latest iteration, that backend uses:
+The current automatic semantic backend candidate is `dubstep-phrase-hybrid`.
+As of the latest iteration, that backend uses:
 
 - The current AutoDJ BPM/beatgrid system with final dubstep BPM quantization.
   For dubstep, final BPMs are rounded to whole-number or `.5` values.

@@ -2,6 +2,8 @@
 
 Researched: 2026-05-17
 
+Updated: 2026-05-21 for drop-anchor recognition follow-up.
+
 ## Executive Decision
 
 The next implementation wave should evaluate a small set of high-signal
@@ -29,6 +31,74 @@ be replaced unless a candidate is measurably better against Rekordbox XML or
 gives a clear operational benefit. The current heuristic section labeler should
 be treated as a weak fallback only; it is not worth protecting as the primary
 section architecture.
+
+## Drop-Anchor Recognition Follow-Up
+
+The 2026-05-21 drop-anchor benchmark showed that more local heuristics alone are
+unlikely to reach the required production target. The v2 explainable ranker
+improved top-3 recall from `46/96` to `53/96`, but the benchmark upper bound is
+much higher: `93/96` Rekordbox drop-start cues have an analyzed beat within
+200 ms. This means BPM and beat placement are mostly adequate; the unresolved
+problem is selecting the correct semantic beat from many plausible phrase
+boundaries.
+
+Important conclusion: the next serious step should be an EDM cue/drop model
+evaluation, not another narrow tweak to section heuristics. The current ranker
+should stay useful as a diagnostic and fallback, but the path to `93-96/96`
+requires a model trained on DJ/EDM cue labels or a supervised ranker trained on
+a much larger cue corpus.
+
+High-priority external candidates:
+
+1. `CUE-DETR`: ISMIR 2024 cue-point estimation model. It treats cue placement as
+   object detection, ships code/checkpoints, and its dataset contains 21k
+   expert cue annotations with beat/downbeat metadata for nearly 5k EDM tracks.
+   This is the closest match to AutoDJ's need for DJ-useful drop and transition
+   cue anchors.
+2. `EDMFormer` / `EDM-98`: EDM-specific structure segmentation with labels
+   `intro`, `buildup`, `drop`, `breakdown`, `outro`, and `silence`. The PyPI
+   package exposes EDM-98 labels and optional inference. It is specifically
+   framed around EDM failures of pop-oriented structure models.
+3. `Raveform`: 2026 EDM/DJ-mix structure dataset with 1,423 expert-annotated
+   EDM tracks and public models. This is strategically relevant for later
+   training/fine-tuning because it combines metrical and functional structure
+   labels in a DJ context.
+4. `all-in-one` activations: not enough alone, but its raw segment and label
+   activations can be used as features in a supervised drop-anchor selector.
+
+Near-term engineering recommendation:
+
+- Add a dedicated `cue-detr`/`edmformer` candidate evaluation spike only when the
+  dependency install and checkpoint download are completed end-to-end. Do not add
+  another graceful-failure placeholder backend.
+- Keep `benchmark-drop-anchors` as the truth harness. Its new
+  `nearestBeatUpperBoundRecall` metric separates timing failures from semantic
+  selection failures.
+- Use top-K drop candidates for planner/audition experiments rather than
+  trusting top-1 until an external EDM cue model or larger supervised ranker is
+  benchmarked.
+
+2026-05-21 CUE-DETR spike result:
+
+- Added a repo-local `cue-detr-predict` adapter and
+  `benchmark-cue-detr-drops` harness. The adapter loads the real
+  `disco-eth/cue-detr` checkpoint and writes explicit cue-candidate artifacts;
+  it does not silently pass when dependencies are missing.
+- Smoke test on `AHEE - Wubcraft` confirmed the model emits cue clusters near
+  both known drops, including an exact first-drop candidate. It also ranks many
+  non-drop phrase/cue changes highly, so raw CUE-DETR output is a structural cue
+  detector, not a drop-only detector.
+- Four-track benchmark smoke with beatgrid snapping and top-10 matching scored
+  only `2/8` Rekordbox drops. The existing `weighted-features-v2` ranker scored
+  `6/8` on the same four tracks and remains the better immediate production
+  fallback.
+- A low-risk multi-drop phrase-pair boost was tested and removed because it did
+  not improve full-batch top-3 recall (`53/96` before and after).
+- Recommendation update: keep CUE-DETR available as a feature generator and
+  research baseline, but do not select it directly for planner drop anchors.
+  The next credible path is a supervised drop-anchor selector trained/evaluated
+  against the user's Rekordbox cue exports, with strict holdout reporting so
+  truth labels do not leak into production inference.
 
 ## Timing Selection Outcome
 
@@ -431,6 +501,49 @@ native/mobile tasks before re-opening web research.
 - Manual correction UX: beatgrid drag/nudge, cue editing, section relabeling,
   and exporting/importing corrected metadata.
 
+## Follow-Up Drop Recognition Experiments
+
+These experiments were run after the first transition audition batches showed
+that drop-start accuracy, not beatgrid accuracy, is the blocking issue for
+drop-switch automation.
+
+- Current AutoDJ ranker ceiling on the 48-song Rekordbox-labeled dubstep set:
+  top-3 recall is still in the low/mid 60% range depending on tolerance, and
+  even top-256 ranked candidates only reached 69/96 references with a 350 ms
+  match tolerance. This means simple rescoring of the existing downsampled
+  energy/onset curves is not enough.
+- Beatgrid upper bound remains much higher: most references have an analyzed
+  beat within tolerance. The missing piece is selecting the correct semantic
+  beat, not producing more beat markers.
+- EDMFormer/EDM-98 was installed and smoke-tested locally. It correctly emits
+  EDM-native labels (`buildup`, `drop`, `breakdown`) and nailed several first
+  drops, but an 8-track smoke benchmark was only 9/16 top-3 after snapping to
+  AutoDJ beatgrids. The common failure is over-segmenting a single drop into
+  multiple drop blocks, which pushes later true drops down the candidate list.
+- A richer supervised experiment using per-beat mel-band, onset, RMS, centroid,
+  flatness, pre/post window deltas, phrase position, and existing artifact
+  features still only reached roughly 68% top-5 leave-one-track-out recall.
+  That strongly suggests we need either more labeled dubstep training data, a
+  specialized external model with stronger dubstep/drop supervision, or an
+  active-learning loop that lets user corrections become training data.
+- Phrase-offset expansion around high-ranked candidates can raise theoretical
+  recall to the mid-80s at wide candidate depths, but it creates too many
+  plausible false anchors to solve the automatic selection problem by itself.
+
+Decision after these experiments:
+
+- Do not block the transition/set-planning POC on unsupervised semantic
+  detection. The current automatic candidates are useful research inputs, but
+  they are not reliable enough to drive drop-switch decisions unattended.
+- Use manually labeled Rekordbox XML cues as the semantic oracle for current
+  planning and transition-recipe work.
+- Keep automatic providers modular and contract-shaped so a future trained
+  drop-start model can replace the Rekordbox oracle without changing the DJ
+  strategy or playback engine.
+- Treat CUE-DETR and EDM-98 integrations as optional research/benchmark tools,
+  not production defaults. Keep large checkpoints and generated outputs under
+  ignored local cache paths.
+
 ## Primary Sources
 
 ### Timing
@@ -454,6 +567,9 @@ native/mobile tasks before re-opening web research.
 ### Structure And Cues
 
 - All-In-One implementation: https://github.com/mir-aidj/all-in-one
+- EDMFormer / EDM-98 paper: https://arxiv.org/abs/2603.08759
+- EDM-98 package and inference stack: https://pypi.org/project/edm98/
+- Raveform EDM/DJ structure dataset: https://mir-aidj.github.io/raveform/
 - SongFormer paper: https://arxiv.org/abs/2510.02797
 - Semantic structural functions paper: https://arxiv.org/abs/2205.14700
 - MSAF implementation: https://github.com/urinieto/msaf

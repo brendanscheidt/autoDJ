@@ -37,7 +37,8 @@ from ..cache import SCHEMA_VERSION, write_json_atomic
 from ..debug_waveform import build_debug_waveform_artifact
 from ..features import EnergyFeatures, build_energy_analysis
 from ..rekordbox_xml import RekordboxCue, RekordboxTrack, RekordboxXmlError, load_rekordbox_tracks
-from ..section_labels import PROJECT_SECTION_LABELS, SectionLabel, map_section_label
+from ..section_labels import PROJECT_SECTION_LABELS, SectionLabel
+from ..semantic_cues import parse_semantic_cue_label
 from ..tempo import normalize_dubstep_bpm
 from .timing_benchmark import write_analysis_audio_wav
 
@@ -624,22 +625,10 @@ def evaluate_sections_against_references(
 
 
 def _parse_cue_label(name: str) -> ParsedCueLabel | None:
-    parts = [part for part in name.strip().lower().split("_") if part]
-    if len(parts) < 2:
+    parsed = parse_semantic_cue_label(name, provider_name="rekordbox")
+    if parsed is None:
         return None
-    boundary = parts[-1]
-    if boundary not in {"start", "end"}:
-        return None
-    ordinal = None
-    label_parts = parts[:-1]
-    if label_parts and label_parts[-1].isdigit():
-        ordinal = int(label_parts[-1])
-        label_parts = label_parts[:-1]
-    if not label_parts:
-        return None
-    source_label = "_".join(label_parts)
-    mapping = map_section_label(source_label, provider_name="rekordbox")
-    return ParsedCueLabel(mapping.label, boundary, ordinal)
+    return ParsedCueLabel(parsed.section_type, parsed.boundary, parsed.ordinal)
 
 
 def _nearest_unused_section(

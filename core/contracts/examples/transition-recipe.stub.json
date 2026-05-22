@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "1.0.0",
+  "recipeId": "recipe-drop-switch-stub",
+  "createdAtUtc": "2026-05-20T00:00:00Z",
+  "transitionFamily": "drop_switch",
+  "semanticRequirements": {
+    "exactBpmRequired": true,
+    "camelotKeyCompatibility": "placeholder",
+    "requiredAnchors": [
+      "a.buildStart",
+      "a.dropStart",
+      "a.cutTime",
+      "b.playStart",
+      "b.dropStart"
+    ],
+    "energyNotes": "Incoming drop should not feel weaker than the layered build.",
+    "humanNotes": "Stub recipe for contract validation."
+  },
+  "anchors": [
+    {
+      "name": "a.buildStart",
+      "deck": "a",
+      "semanticRef": "song_a.second_build.start"
+    },
+    {
+      "name": "a.dropStart",
+      "deck": "a",
+      "semanticRef": "song_a.second_drop.start"
+    },
+    {
+      "name": "b.dropStart",
+      "deck": "b",
+      "semanticRef": "song_b.first_drop.start"
+    }
+  ],
+  "automation": [
+    {
+      "deck": "b",
+      "control": "volume",
+      "keyframes": [
+        {
+          "anchor": "a.buildStart",
+          "offsetBeats": 0,
+          "value": 0,
+          "interpolation": "hold"
+        },
+        {
+          "anchor": "a.buildStart",
+          "offsetBeats": 32,
+          "value": 1,
+          "interpolation": "smoothstep"
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

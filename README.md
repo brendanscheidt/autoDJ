@@ -29,13 +29,23 @@ library-decoded signal analysis for waveform previews, energy and onset curves,
 BPM, normalized dubstep tempo, beat markers, rough sections, and cue candidates.
 
 Spec 005 adaptive MIR evaluation selected the current project-owned timing
-stack, `current-autodj-signal`, for BPM and beatgrid. It also selected
-`dubstep-phrase-hybrid` for semantic sections. That section backend combines the
-selected beatgrid, energy/bass/onset evidence, All-In-One boundaries,
-SongFormer boundaries, and dubstep phrase heuristics to emit
-intro/verse/build/drop/break/outro sections. The old rough section heuristic now
-exists only as a fallback when the selected semantic backend cannot run or emits
-no usable sections.
+stack, `current-autodj-signal`, for BPM and beatgrid. It also produced the
+`dubstep-phrase-hybrid` semantic section backend, but repeated manual auditions
+showed that automatic drop-start recognition is not yet accurate enough to be
+the main POC planning source. The current product loop therefore treats
+Rekordbox XML hot-cue labels as the trusted semantic oracle for build/drop/break
+positions, while automatic semantic backends remain experimental candidates and
+fallbacks.
+
+Spec 006 added the first concrete MixPlan/playback POC: second-build drop
+switches, drop-end reverb exits, transient nudging, energy-aware drop-switch
+gain planning, a Python offline WAV renderer, and a C++ planner tool for
+generating auditionable transition artifacts.
+
+Spec 007 added a native JUCE transition authoring workbench for inspecting two
+analyzed tracks, editing automation keyframes, previewing playback, and exporting
+session/MixPlan/recipe JSON. It is intended for transition-recipe authoring and
+debugging, not for automatic semantic labeling.
 
 Key, vocals, downbeats, and stems are still conservative placeholders unless a
 future spec adds a defensible backend. The Python/WSL worker remains a POC and
@@ -62,6 +72,7 @@ Planned pipeline:
 AudioRepository
   -> GenreAnalyzer
   -> TrackAnalyzer / AnalysisWorker
+  -> SemanticCueProvider
   -> MetadataCache
   -> DJStrategy
   -> MixPlan
@@ -108,8 +119,10 @@ Single-file stub commands remain available:
 Batch analysis consumes a repository manifest produced by the local repository
 flow and writes analyzed artifacts into the metadata cache. Real signal analysis
 requires the analysis dependencies documented below. By default, `analyze-batch`
-uses `current-autodj-signal` for BPM/beatgrid and `dubstep-phrase-hybrid` for
-semantic sections.
+uses `current-autodj-signal` for BPM/beatgrid. Automatic sections can still be
+generated with `dubstep-phrase-hybrid`, but production-quality POC transition
+planning should prefer Rekordbox-labeled semantic cues until the trained
+drop-start model exists.
 
 ```powershell
 .\.venv\Scripts\python -m autodj_analysis analyze-batch `
@@ -141,6 +154,45 @@ rough-section fallback explicitly:
 Install FFmpeg tools so `ffprobe` is available on `PATH` before running real
 batch analysis.
 
+## Rekordbox Semantic Oracle
+
+For the current transition-planning POC, manually labeled Rekordbox XML is the
+trusted semantic cue source. Name hot cues with canonical labels:
+
+```text
+intro_1_start
+build_1_start
+drop_1_start
+drop_1_end
+break_1_start
+build_2_start
+drop_2_start
+drop_2_end
+outro_1_start
+```
+
+The parser accepts any supported canonical section label ending in `_start` or
+`_end`. If an XML has no named semantic cues, the importer keeps the legacy
+fallback where cue pairs are interpreted as drop start/end pairs.
+
+Apply Rekordbox labels to an analyzed artifact with:
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && autodj-analysis apply-rekordbox-xml <analyzed-track.json> <rekordbox-export.xml> --out <analyzed-track.rekordbox.json>"
+```
+
+Export AutoDJ timing and section metadata back into a one-track Rekordbox XML
+for visual inspection with:
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && autodj-analysis export-rekordbox-xml <analyzed-track.json> --out <autodj-export.xml> --source-uri <song.mp3>"
+```
+
+The semantic source boundary is intentionally modular: DJ planning consumes
+sections/cues from `AnalyzedTrack`, regardless of whether those cues came from
+Rekordbox XML, `dubstep-phrase-hybrid`, a future trained drop-start model, or
+another experimental provider.
+
 ## WSL Real-Analysis Environment
 
 Use WSL/Linux Python 3.11 for the full MIR dependency set:
@@ -154,21 +206,23 @@ wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/Users/Brendan/Dev/AudioProj && source
 wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && python -m pip install -e './analysis/worker-python[dev,analysis-wsl,all-in-one,songformer]'"
 ```
 
-The full selected semantic backend uses All-In-One and SongFormer internally.
-That means the WSL environment needs the `all-in-one` and `songformer` extras,
+The experimental `dubstep-phrase-hybrid` backend uses All-In-One and SongFormer
+internally. That means WSL needs the `all-in-one` and `songformer` extras,
 including PyTorch/Torchaudio, TorchCodec, NATTEN, Demucs, CPJKU madmom,
 Transformers 4.51.x, Hugging Face Hub 0.30.x, MuQ, MSAF, and related model
-runtime dependencies. This stack is intentionally WSL/Linux-oriented for the
-POC. Windows Python can still run lightweight tests and rough-section smoke
-tests, but the full semantic backend should be run in WSL.
+runtime dependencies. This stack is intentionally WSL/Linux-oriented for
+experimentation. Windows Python can still run lightweight tests and
+rough-section smoke tests.
 
 Runtime and licensing constraints to keep in mind:
 
 - `current-autodj-signal` is project-owned and remains the selected BPM/beatgrid
   path.
 - `dubstep-phrase-hybrid` depends on All-In-One and SongFormer evidence. It is
-  suitable for the local POC but still has model/dependency licensing and
-  productization review before any commercial distribution.
+  useful for experiments and fallback artifacts, but it is not trusted enough
+  for unsupervised drop-switch planning.
+- Rekordbox XML cue labels are the current semantic oracle for transition
+  planning and recipe evaluation.
 - All-In-One code is MIT, but its heavy runtime includes Demucs, NATTEN, madmom,
   Torch/TorchCodec, and FFmpeg behavior that must remain documented.
 - SongFormer repository/model-card terms are CC-BY-4.0, with downstream model
@@ -212,7 +266,18 @@ Read the steering docs before changing architecture or contracts:
 - [.codex/steering/07-analysis-pipeline.md](.codex/steering/07-analysis-pipeline.md)
 - [.codex/steering/08-engineering-practices.md](.codex/steering/08-engineering-practices.md)
 
-Current executable spec package:
+Current executable spec packages:
+
+- [.codex/specs/007-transition-recipe-authoring-workbench/kiro.json](.codex/specs/007-transition-recipe-authoring-workbench/kiro.json)
+- [.codex/specs/007-transition-recipe-authoring-workbench/requirements.md](.codex/specs/007-transition-recipe-authoring-workbench/requirements.md)
+- [.codex/specs/007-transition-recipe-authoring-workbench/design.md](.codex/specs/007-transition-recipe-authoring-workbench/design.md)
+- [.codex/specs/007-transition-recipe-authoring-workbench/tasks.md](.codex/specs/007-transition-recipe-authoring-workbench/tasks.md)
+- [.codex/specs/006-playback-engine-mixplan-poc/kiro.json](.codex/specs/006-playback-engine-mixplan-poc/kiro.json)
+- [.codex/specs/006-playback-engine-mixplan-poc/requirements.md](.codex/specs/006-playback-engine-mixplan-poc/requirements.md)
+- [.codex/specs/006-playback-engine-mixplan-poc/design.md](.codex/specs/006-playback-engine-mixplan-poc/design.md)
+- [.codex/specs/006-playback-engine-mixplan-poc/tasks.md](.codex/specs/006-playback-engine-mixplan-poc/tasks.md)
+
+Completed analysis spec package:
 
 - [.codex/specs/005-adaptive-mir-candidate-evaluation/kiro.json](.codex/specs/005-adaptive-mir-candidate-evaluation/kiro.json)
 - [.codex/specs/005-adaptive-mir-candidate-evaluation/requirements.md](.codex/specs/005-adaptive-mir-candidate-evaluation/requirements.md)

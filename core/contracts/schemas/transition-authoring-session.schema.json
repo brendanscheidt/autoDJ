@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autodj.transition-authoring-session.v1",
+  "title": "AutoDJ Transition Authoring Session v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "transitionFamily",
+    "decks",
+    "lanes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "transitionFamily": {
+      "enum": [
+        "drop_switch",
+        "double_drop",
+        "reverb_exit",
+        "custom"
+      ]
+    },
+    "notes": {
+      "type": "string"
+    },
+    "decks": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/deckSession"
+      }
+    },
+    "anchors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sessionAnchor"
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sessionLane"
+      }
+    }
+  },
+  "$defs": {
+    "deckId": {
+      "enum": [
+        "a",
+        "b"
+      ]
+    },
+    "deckSession": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "deck",
+        "trackId",
+        "audioPath",
+        "analyzedTrackPath",
+        "debugWaveformPath",
+        "centerSeconds",
+        "zoomSeconds"
+      ],
+      "properties": {
+        "deck": {
+          "$ref": "#/$defs/deckId"
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "audioPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "analyzedTrackPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "debugWaveformPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "centerSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "previewStartDelaySeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "zoomSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "sessionAnchor": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "deck",
+        "sourceSeconds"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deck": {
+          "$ref": "#/$defs/deckId"
+        },
+        "sourceSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "barBeat": {
+          "type": "string"
+        }
+      }
+    },
+    "sessionLane": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "deck",
+        "control",
+        "keyframes"
+      ],
+      "properties": {
+        "deck": {
+          "$ref": "#/$defs/deckId"
+        },
+        "control": {
+          "enum": [
+            "volume",
+            "eqLow",
+            "eqMid",
+            "eqHigh",
+            "reverbWet",
+            "echoWet",
+            "reverbTailGain",
+            "play",
+            "stop"
+          ]
+        },
+        "keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sessionKeyframe"
+          }
+        }
+      }
+    },
+    "sessionKeyframe": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "sourceSeconds",
+        "value"
+      ],
+      "properties": {
+        "sourceSeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "interpolation": {
+          "enum": [
+            "hold",
+            "linear",
+            "smoothstep",
+            "exponential"
+          ]
+        }
+      }
+    }
+  }
+}

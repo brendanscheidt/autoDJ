@@ -4,48 +4,145 @@
   "createdAtUtc": "2026-01-01T00:00:00Z",
   "strategy": {
     "strategyId": "dubstep-dj",
-    "strategyVersion": "0.1.0",
+    "strategyVersion": "0.2.0",
     "randomSeed": "foundation-stub"
   },
+  "assets": [
+    {
+      "trackId": "track-stub-a",
+      "sourceUri": "fixtures/track-stub-a.wav",
+      "formatHint": "wav",
+      "contentHash": "sha256:stub-a",
+      "durationSeconds": 224.0
+    },
+    {
+      "trackId": "track-stub-b",
+      "sourceUri": "fixtures/track-stub-b.wav",
+      "formatHint": "wav",
+      "contentHash": "sha256:stub-b",
+      "durationSeconds": 256.0
+    },
+    {
+      "trackId": "track-stub-c",
+      "sourceUri": "fixtures/track-stub-c.wav",
+      "formatHint": "wav",
+      "contentHash": "sha256:stub-c",
+      "durationSeconds": 192.0
+    }
+  ],
   "tracks": [
     {
       "placementId": "place-track-stub-a",
       "trackId": "track-stub-a",
       "deck": 1,
       "sourceStartSeconds": 0.0,
-      "sourceEndSeconds": 96.0,
+      "sourceEndSeconds": 128.0,
       "timelineStartSeconds": 0.0,
-      "timelineEndSeconds": 96.0,
+      "timelineEndSeconds": 128.0,
       "role": "primary"
     },
     {
       "placementId": "place-track-stub-b",
       "trackId": "track-stub-b",
       "deck": 2,
-      "sourceStartSeconds": 16.0,
-      "sourceEndSeconds": 112.0,
-      "timelineStartSeconds": 64.0,
-      "timelineEndSeconds": 160.0,
+      "sourceStartSeconds": 64.0,
+      "sourceEndSeconds": 240.0,
+      "timelineStartSeconds": 96.0,
+      "timelineEndSeconds": 272.0,
+      "role": "incoming"
+    },
+    {
+      "placementId": "place-track-stub-c",
+      "trackId": "track-stub-c",
+      "deck": 1,
+      "sourceStartSeconds": 0.25,
+      "sourceEndSeconds": 96.0,
+      "timelineStartSeconds": 224.0,
+      "timelineEndSeconds": 320.0,
       "role": "incoming"
     }
   ],
   "transitions": [
     {
-      "transitionId": "transition-build-to-drop-stub",
+      "transitionId": "transition-second-build-drop-switch-stub",
       "fromPlacementId": "place-track-stub-a",
       "toPlacementId": "place-track-stub-b",
       "technique": "build_to_drop_swap",
-      "timelineStartSeconds": 64.0,
-      "timelineEndSeconds": 96.0,
+      "templateId": "second_build_drop_switch_v1",
+      "timelineStartSeconds": 96.0,
+      "timelineEndSeconds": 128.0,
+      "alignedDropTimelineSeconds": 128.0,
+      "handoffTimelineSeconds": 120.0,
+      "measureCountToTarget": 8,
       "score": 0.82,
       "reasons": [
-        "Stub tracks share normalized BPM",
-        "Incoming placement starts on a phrase boundary",
-        "Transition demonstrates build-to-drop command shape"
+        "Stub song A exposes build 2 into drop 2",
+        "Stub song B can start the same measure count before drop 1",
+        "Outgoing deck is silent two measures before the aligned drop"
       ],
       "riskFlags": [
         "placeholder_analysis"
-      ]
+      ],
+      "sourceAnchors": {
+        "fromBuildStart": {
+          "trackId": "track-stub-a",
+          "sectionId": "section-build-002",
+          "sourceSeconds": 96.0,
+          "beatIndex": 224,
+          "measureIndex": 56
+        },
+        "fromDropStart": {
+          "trackId": "track-stub-a",
+          "sectionId": "section-drop-002",
+          "sourceSeconds": 128.0,
+          "beatIndex": 256,
+          "measureIndex": 64
+        },
+        "toDropStart": {
+          "trackId": "track-stub-b",
+          "sectionId": "section-drop-001",
+          "sourceSeconds": 96.0,
+          "beatIndex": 192,
+          "measureIndex": 48
+        }
+      }
+    },
+    {
+      "transitionId": "transition-drop-end-reverb-exit-stub",
+      "fromPlacementId": "place-track-stub-b",
+      "toPlacementId": "place-track-stub-c",
+      "technique": "drop_end_reverb_exit",
+      "templateId": "drop_end_reverb_exit_v1",
+      "timelineStartSeconds": 192.0,
+      "timelineEndSeconds": 240.0,
+      "handoffTimelineSeconds": 224.0,
+      "measureCountToTarget": 8,
+      "score": 0.74,
+      "reasons": [
+        "Stub song B has no reliable second build/drop pair",
+        "Fallback exits the active drop with low-EQ reduction and post-fader reverb",
+        "Stub song C starts from its first beatgrid beat after initial silence"
+      ],
+      "riskFlags": [
+        "fallback_template",
+        "placeholder_analysis"
+      ],
+      "sourceAnchors": {
+        "fromDropEnd": {
+          "trackId": "track-stub-b",
+          "sectionId": "section-drop-001",
+          "sourceSeconds": 192.0,
+          "beatIndex": 384,
+          "measureIndex": 96
+        },
+        "toFirstBeat": {
+          "trackId": "track-stub-c",
+          "cueId": "cue-first-beat-001",
+          "sourceSeconds": 0.25,
+          "beatIndex": 0,
+          "measureIndex": 0
+        }
+      }
     }
   ],
   "commands": [
@@ -64,15 +161,15 @@
     },
     {
       "type": "load",
-      "at": 60.0,
+      "at": 92.0,
       "deck": 2,
       "trackId": "track-stub-b",
       "stem": "full",
-      "cueSeconds": 16.0
+      "cueSeconds": 64.0
     },
     {
       "type": "play",
-      "at": 64.0,
+      "at": 96.0,
       "deck": 2
     },
     {
@@ -81,12 +178,94 @@
       "control": "volume",
       "keyframes": [
         {
-          "at": 64.0,
+          "at": 96.0,
           "value": 0.0,
           "interpolation": "hold"
         },
         {
+          "at": 128.0,
+          "value": 1.0,
+          "interpolation": "smoothstep"
+        }
+      ]
+    },
+    {
+      "type": "automate",
+      "deck": 1,
+      "control": "volume",
+      "keyframes": [
+        {
           "at": 96.0,
+          "value": 1.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 120.0,
+          "value": 0.0,
+          "interpolation": "smoothstep"
+        }
+      ]
+    },
+    {
+      "type": "automate",
+      "control": "crossfader",
+      "keyframes": [
+        {
+          "at": 96.0,
+          "value": -1.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 128.0,
+          "value": 1.0,
+          "interpolation": "smoothstep"
+        }
+      ]
+    },
+    {
+      "type": "stop",
+      "at": 128.0,
+      "deck": 1
+    },
+    {
+      "type": "automate",
+      "deck": 2,
+      "control": "eqLow",
+      "keyframes": [
+        {
+          "at": 192.0,
+          "value": 1.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 224.0,
+          "value": 0.0,
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "type": "automate",
+      "deck": 2,
+      "control": "reverbWet",
+      "postFader": true,
+      "effectParameters": {
+        "style": "cdj",
+        "reverbDecaySeconds": 4.0
+      },
+      "keyframes": [
+        {
+          "at": 192.0,
+          "value": 0.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 220.0,
+          "value": 0.5,
+          "interpolation": "linear"
+        },
+        {
+          "at": 224.0,
           "value": 1.0,
           "interpolation": "linear"
         }
@@ -94,44 +273,94 @@
     },
     {
       "type": "automate",
-      "deck": 1,
-      "control": "eqLow",
+      "deck": 2,
+      "control": "volume",
       "keyframes": [
         {
-          "at": 88.0,
+          "at": 220.0,
           "value": 1.0,
           "interpolation": "hold"
         },
         {
-          "at": 96.0,
+          "at": 224.0,
           "value": 0.0,
           "interpolation": "linear"
         }
       ]
     },
     {
-      "type": "setLoop",
-      "at": 88.0,
-      "deck": 1,
-      "startSeconds": 88.0,
-      "lengthBeats": 4.0
+      "type": "automate",
+      "deck": 2,
+      "control": "reverbTailGain",
+      "postFader": true,
+      "effectParameters": {
+        "style": "cdj",
+        "reverbDecaySeconds": 4.0
+      },
+      "keyframes": [
+        {
+          "at": 220.0,
+          "value": 0.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 224.0,
+          "value": 1.0,
+          "interpolation": "linear"
+        },
+        {
+          "at": 240.0,
+          "value": 0.0,
+          "interpolation": "smoothstep"
+        }
+      ]
     },
     {
-      "type": "clearLoop",
-      "at": 96.0,
+      "type": "load",
+      "at": 220.0,
+      "deck": 1,
+      "trackId": "track-stub-c",
+      "stem": "full",
+      "cueSeconds": 0.25
+    },
+    {
+      "type": "play",
+      "at": 224.0,
       "deck": 1
+    },
+    {
+      "type": "automate",
+      "deck": 1,
+      "control": "eqLow",
+      "keyframes": [
+        {
+          "at": 224.0,
+          "value": 0.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 240.0,
+          "value": 1.0,
+          "interpolation": "smoothstep"
+        }
+      ]
     },
     {
       "type": "stop",
-      "at": 96.0,
-      "deck": 1
+      "at": 240.0,
+      "deck": 2
     }
   ],
   "annotations": [
     {
-      "at": 64.0,
-      "transitionId": "transition-build-to-drop-stub",
-      "message": "Incoming track is staged for a phrase-aligned drop swap"
+      "at": 96.0,
+      "transitionId": "transition-second-build-drop-switch-stub",
+      "message": "Incoming build is aligned so track B owns the drop where track A drop 2 would land"
+    },
+    {
+      "at": 224.0,
+      "transitionId": "transition-drop-end-reverb-exit-stub",
+      "message": "Track B dry output is gone at drop end; only post-fader reverb tail remains while track C starts"
     }
   ]
 }

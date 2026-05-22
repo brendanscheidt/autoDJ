@@ -1,0 +1,50 @@
+{
+  "id": "007-transition-recipe-authoring-workbench",
+  "title": "Native Transition Recipe Authoring Workbench",
+  "specStyle": "kiro-implementation",
+  "status": "draft",
+  "sourceSpec": "../007-transition-recipe-authoring-workbench.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/05-dubstep-dj-strategy.md",
+    "../../steering/06-playback-engine.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "decisionGates": [
+    {
+      "id": "first-native-authoring-audition",
+      "description": "After the first native UI can load two real songs, preview automation, and export a specific MixPlan, stop for user audition before expanding controls."
+    },
+    {
+      "id": "first-generic-recipe-export",
+      "description": "After the first assisted-anchor recipe export, ask the user whether the anchor workflow is understandable before adding more transition families."
+    }
+  ],
+  "subagentExecutionRules": [
+    "Read this kiro.json, requirements.md, design.md, tasks.md, and all required steering context before executing tasks.",
+    "Build the authoring UI in the existing JUCE desktop app.",
+    "Use explicit per-deck audio/analyzed/debug-waveform file loading for v1.",
+    "Use debug-waveform JSON as the primary visual source; do not silently generate replacement waveform data in v1.",
+    "Keep rendered audio, real songs, local sessions, and exported user MixPlans out of git.",
+    "Do not introduce HTML, Electron, Tauri, or a new frontend runtime for this spec.",
+    "Stop at manual audition checkpoints and record the user's verdict before marking checkpoint tasks complete."
+  ],
+  "verificationCommands": {
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug",
+    "contractValidation": "ctest --preset debug -R autodj_contract_examples --output-on-failure",
+    "desktopTests": "ctest --preset debug -R autodj_desktop --output-on-failure"
+  }
+}

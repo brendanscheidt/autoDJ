@@ -26,14 +26,19 @@ Core decisions:
 - DJ modules generate mix plans. The player does not contain genre logic.
 - Audio analysis and stem separation run offline before playback.
 - Selected BPM/beatgrid path is `current-autodj-signal`.
-- Selected semantic section path is `dubstep-phrase-hybrid`, with rough current
-  sections only as fallback.
+- Current POC semantic planning source is Rekordbox XML hot-cue labels applied
+  into `AnalyzedTrack` artifacts. `dubstep-phrase-hybrid` and other automatic
+  section systems are experimental/fallback providers until a trained drop-start
+  model proves reliable enough.
+- Transition planning and playback should consume the normalized
+  `AnalyzedTrack` section/cue contract, not provider-specific Rekordbox XML,
+  All-In-One, SongFormer, CUE-DETR, or EDM-98 objects directly.
 - The playback core must stay portable enough to move toward iOS/Android.
 
-The current adaptive analysis spec package is:
+Current active implementation/spec packages are:
 
-- `../specs/005-adaptive-mir-candidate-evaluation/`
+- `../specs/006-playback-engine-mixplan-poc/`
+- `../specs/007-transition-recipe-authoring-workbench/`
 
-That folder contains Kiro-style `kiro.json`, `requirements.md`, `design.md`,
-`tasks.md`, research, benchmark, and future-spec handoff files. Earlier spec
+Spec 005 remains the analysis research and benchmark record. Earlier spec
 packages remain under `../specs/`.

@@ -1,0 +1,39 @@
+# Copy this file when you design one exact drop-switch transition in Rekordbox.
+# The first beat in each analyzed beatgrid is bar 1.1, then 1.2, 1.3, 1.4, 2.1.
+# The parser resolves these source bar stamps into a concrete MixPlan JSON.
+
+kind: specific_transition
+type: drop_switch
+plan_id: manual-drop-switch-example
+transition_id: manual-drop-switch-example
+bpm: 145
+notes: Describe why this exact drop switch sounded good.
+
+# Song A is the outgoing song. For a drop switch, its second build/drop usually drive the transition.
+song_a.track_id: song-a
+song_a.file: C:/Path/To/Song A.mp3
+song_a.play_from: 1.1
+song_a.build_start: 89.1
+song_a.drop_start: 105.1
+song_a.cut_at: 104.1
+song_a.end_at: 105.1
+
+# Song B is the incoming song. The parser aligns song_b.drop_start with song_a.drop_start.
+song_b.track_id: song-b
+song_b.file: C:/Path/To/Song B.mp3
+song_b.play_from: 17.1
+song_b.drop_start: 33.1
+song_b.end_at: 49.1
+
+# Actions are written in the local bar/beat timeline of the deck named before the dot.
+# Interpolation words:
+# - instant: hold previous value until this exact point, then jump
+# - straight: straight-line fade/ramp
+# - smooth: eased fade/ramp
+# - curve: more aggressive curved fade/ramp
+action: b.volume at 17.1 = 0 instant
+action: b.volume at 25.1 = 1 smooth
+action: b.eqLow at 17.1 = 0 instant
+action: b.eqLow at 25.1 = 1 instant
+action: a.eqLow at 97.1 = 0 instant
+action: a.volume at 104.1 = 0 instant

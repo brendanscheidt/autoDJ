@@ -33,13 +33,23 @@ foreach(path IN LISTS repository_code_files)
     endforeach()
 endforeach()
 
-file(GLOB_RECURSE project_files
-    LIST_DIRECTORIES false
-    "${PROJECT_ROOT}/*"
+execute_process(
+    COMMAND git -C "${PROJECT_ROOT}" ls-files -c -o --exclude-standard
+    OUTPUT_VARIABLE project_files_text
+    RESULT_VARIABLE git_ls_files_result
+    OUTPUT_STRIP_TRAILING_WHITESPACE
 )
+if(NOT git_ls_files_result EQUAL 0)
+    message(FATAL_ERROR "Could not list repository files with git ls-files")
+endif()
+string(REPLACE "\n" ";" project_relative_files "${project_files_text}")
 
 set(artifact_failures "")
-foreach(path IN LISTS project_files)
+foreach(relative_path IN LISTS project_relative_files)
+    if(relative_path STREQUAL "")
+        continue()
+    endif()
+    set(path "${PROJECT_ROOT}/${relative_path}")
     file(TO_CMAKE_PATH "${path}" normalized_path)
     if(normalized_path MATCHES "/(build|\\.git|\\.venv|\\.venv-analysis|__pycache__)/")
         continue()

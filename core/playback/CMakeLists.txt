@@ -1,4 +1,5 @@
 add_library(autodj_playback STATIC
+    src/mix_plan.cpp
     src/playback_engine.cpp
 )
 
@@ -18,10 +19,14 @@ add_executable(autodj_playback_tests
     tests/playback_tests.cpp
 )
 
+target_compile_definitions(autodj_playback_tests
+    PRIVATE
+        AUTODJ_CONTRACTS_DIR="${CMAKE_SOURCE_DIR}/core/contracts"
+)
+
 target_link_libraries(autodj_playback_tests
     PRIVATE
         autodj_playback
 )
 
 add_test(NAME autodj_playback_tests COMMAND autodj_playback_tests)
-

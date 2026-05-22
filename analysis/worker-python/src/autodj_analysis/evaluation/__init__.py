@@ -1,5 +1,26 @@
 """Evaluation harnesses for candidate analysis backends."""
 
+from .drop_anchor_benchmark import (
+    DEFAULT_DROP_ANCHOR_MATCH_TOLERANCE_SECONDS,
+    DEFAULT_DROP_ANCHOR_TOP_K,
+    DROP_ANCHOR_BENCHMARK_REPORT_TYPE,
+    DropAnchorBenchmarkError,
+    run_drop_anchor_benchmark,
+)
+from .cue_detr_benchmark import (
+    CUE_DETR_DROP_BENCHMARK_REPORT_TYPE,
+    DEFAULT_CUE_DETR_DROP_MATCH_TOLERANCE_SECONDS,
+    DEFAULT_CUE_DETR_DROP_TOP_K,
+    DEFAULT_CUE_DETR_SNAP_WINDOW_SECONDS,
+    run_cue_detr_drop_benchmark,
+)
+from .edm98_benchmark import (
+    DEFAULT_EDM98_DROP_MATCH_TOLERANCE_SECONDS,
+    DEFAULT_EDM98_DROP_TOP_K,
+    DEFAULT_EDM98_SNAP_WINDOW_SECONDS,
+    EDM98_DROP_BENCHMARK_REPORT_TYPE,
+    run_edm98_drop_benchmark,
+)
 from .rekordbox import (
     REKORDBOX_EVALUATION_REPORT_TYPE,
     EvaluationError,
@@ -35,6 +56,21 @@ from .timing_benchmark import (
 )
 
 __all__ = [
+    "DEFAULT_DROP_ANCHOR_MATCH_TOLERANCE_SECONDS",
+    "DEFAULT_DROP_ANCHOR_TOP_K",
+    "DROP_ANCHOR_BENCHMARK_REPORT_TYPE",
+    "DropAnchorBenchmarkError",
+    "run_drop_anchor_benchmark",
+    "CUE_DETR_DROP_BENCHMARK_REPORT_TYPE",
+    "DEFAULT_CUE_DETR_DROP_MATCH_TOLERANCE_SECONDS",
+    "DEFAULT_CUE_DETR_DROP_TOP_K",
+    "DEFAULT_CUE_DETR_SNAP_WINDOW_SECONDS",
+    "run_cue_detr_drop_benchmark",
+    "DEFAULT_EDM98_DROP_MATCH_TOLERANCE_SECONDS",
+    "DEFAULT_EDM98_DROP_TOP_K",
+    "DEFAULT_EDM98_SNAP_WINDOW_SECONDS",
+    "EDM98_DROP_BENCHMARK_REPORT_TYPE",
+    "run_edm98_drop_benchmark",
     "REKORDBOX_EVALUATION_REPORT_TYPE",
     "EvaluationError",
     "RekordboxEvaluationOptions",

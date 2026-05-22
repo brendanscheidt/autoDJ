@@ -1,7 +1,9 @@
 import json
 import importlib.util
+import math
 from pathlib import Path
 import subprocess
+import wave
 
 import pytest
 
@@ -203,6 +205,93 @@ def _write_manifest(tmp_path: Path, tracks: list[dict]) -> Path:
     return manifest_path
 
 
+def _write_cli_gain_wav(path: Path, *, sample_rate: int, amplitude: float) -> None:
+    frames = bytearray()
+    for frame in range(sample_rate * 2):
+        seconds = frame / sample_rate
+        sample = amplitude * math.sin(2.0 * math.pi * 440.0 * seconds)
+        frames.extend(round(sample * 32767).to_bytes(2, byteorder="little", signed=True))
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(bytes(frames))
+
+
+def _write_cli_gain_plan(tmp_path: Path) -> Path:
+    plan = {
+        "schemaVersion": "1.0.0",
+        "planId": "cli-gain-plan",
+        "assets": [
+            {"trackId": "outgoing", "sourceUri": "outgoing.wav"},
+            {"trackId": "incoming", "sourceUri": "incoming.wav"},
+        ],
+        "tracks": [
+            {
+                "placementId": "place-outgoing",
+                "trackId": "outgoing",
+                "deck": 1,
+                "sourceStartSeconds": 0.0,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 1.0,
+            },
+            {
+                "placementId": "place-incoming",
+                "trackId": "incoming",
+                "deck": 2,
+                "sourceStartSeconds": 0.0,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 2.0,
+            },
+        ],
+        "transitions": [
+            {
+                "transitionId": "transition-cli-gain",
+                "fromPlacementId": "place-outgoing",
+                "toPlacementId": "place-incoming",
+                "technique": "build_to_drop_swap",
+                "templateId": "second_build_drop_switch_v1",
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 1.0,
+                "measureCountToTarget": 1.0,
+                "score": 1.0,
+                "sourceAnchors": {
+                    "fromBuildStart": {"trackId": "outgoing", "sourceSeconds": 0.0},
+                    "fromDropStart": {"trackId": "outgoing", "sourceSeconds": 1.0},
+                    "toBuildStart": {"trackId": "incoming", "sourceSeconds": 0.0},
+                    "toDropStart": {"trackId": "incoming", "sourceSeconds": 1.0},
+                },
+            }
+        ],
+        "commands": [
+            {
+                "type": "automate",
+                "at": 0.0,
+                "deck": 2,
+                "control": "volume",
+                "keyframes": [
+                    {"at": 0.0, "value": 0.0, "interpolation": "hold"},
+                    {"at": 0.5, "value": 1.0, "interpolation": "smoothstep"},
+                ],
+            },
+            {
+                "type": "automate",
+                "at": 0.0,
+                "deck": 1,
+                "control": "volume",
+                "keyframes": [
+                    {"at": 0.0, "value": 1.0, "interpolation": "hold"},
+                    {"at": 0.875, "value": 0.0, "interpolation": "hold"},
+                ],
+            },
+        ],
+        "annotations": [],
+    }
+    path = tmp_path / "mix-plan.json"
+    path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+    return path
+
+
 def test_cli_analyze_batch_help_lists_expected_options(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["analyze-batch", "--help"])
@@ -252,6 +341,268 @@ def test_cli_benchmark_sections_help_lists_expected_options(capsys) -> None:
     assert "--candidates" in captured.out
     assert "--sample-rate" in captured.out
     assert "--debug-waveform-points" in captured.out
+
+
+def test_cli_render_mixplan_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["render-mixplan", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "mix_plan" in captured.out
+    assert "--asset-root" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_rank_drop_anchors_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["rank-drop-anchors", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "analyzed_track" in captured.out
+    assert "--out" in captured.out
+    assert "--max-candidates" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_benchmark_drop_anchors_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["benchmark-drop-anchors", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "rekordbox_xml" in captured.out
+    assert "--analysis-root" in captured.out
+    assert "--top-k" in captured.out
+    assert "--match-tolerance-ms" in captured.out
+    assert "--max-candidates" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_cue_detr_predict_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["cue-detr-predict", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "audio_path" in captured.out
+    assert "--out" in captured.out
+    assert "--checkpoint" in captured.out
+    assert "--sensitivity" in captured.out
+    assert "--min-distance-seconds" in captured.out
+    assert "--device" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_benchmark_cue_detr_drops_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["benchmark-cue-detr-drops", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "rekordbox_xml" in captured.out
+    assert "--analysis-root" in captured.out
+    assert "--top-k" in captured.out
+    assert "--match-tolerance-ms" in captured.out
+    assert "--snap-window-ms" in captured.out
+    assert "--limit" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_edm98_predict_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["edm98-predict", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "audio_path" in captured.out
+    assert "--out" in captured.out
+    assert "--checkpoint" in captured.out
+    assert "--musicfm-model" in captured.out
+    assert "--device" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_benchmark_edm98_drops_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["benchmark-edm98-drops", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "rekordbox_xml" in captured.out
+    assert "--analysis-root" in captured.out
+    assert "--top-k" in captured.out
+    assert "--match-tolerance-ms" in captured.out
+    assert "--snap-window-ms" in captured.out
+    assert "--limit" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_nudge_mixplan_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["nudge-mixplan", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "mix_plan" in captured.out
+    assert "--asset-root" in captured.out
+    assert "--window-ms" in captured.out
+    assert "--max-nudge-ms" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_gain_plan_drop_switch_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["gain-plan-drop-switch", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "mix_plan" in captured.out
+    assert "--out" in captured.out
+    assert "--report" in captured.out
+    assert "--asset-root" in captured.out
+    assert "--target-headroom-db" in captured.out
+    assert "--max-overlap-gain-reduction-db" in captured.out
+    assert "--drop-energy-floor-db" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_export_rekordbox_xml_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["export-rekordbox-xml", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "analyzed_track" in captured.out
+    assert "--out" in captured.out
+    assert "--source-uri" in captured.out
+    assert "--track-name" in captured.out
+    assert "--include-cue-points" in captured.out
+    assert "--cue-policy" in captured.out
+    assert "--max-hot-cues" in captured.out
+    assert "--time-precision" in captured.out
+
+
+def test_cli_parse_transition_template_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["parse-transition-template", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "template" in captured.out
+    assert "bar/beat" in captured.out
+    assert "--out" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_export_rekordbox_xml_writes_xml(tmp_path, capsys) -> None:
+    analyzed_path = tmp_path / "analyzed-track.json"
+    analyzed_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "1.0.0",
+                "trackId": "track-a",
+                "title": "Track A",
+                "durationSeconds": 64.0,
+                "tempo": {"bpm": 140.0, "normalizedBpm": 140.0},
+                "beatGrid": {"beats": [{"index": 0, "timeSeconds": 0.05, "confidence": 1.0}]},
+                "sections": [{"id": "section-drop-001", "type": "drop", "startSeconds": 32.0, "endSeconds": 48.0}],
+                "cuePoints": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "rekordbox.xml"
+
+    exit_code = main(
+        [
+            "export-rekordbox-xml",
+            str(analyzed_path),
+            "--out",
+            str(output_path),
+            "--source-uri",
+            "C:/Music/track-a.mp3",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    xml_text = output_path.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["artifact"] == "rekordbox-xml"
+    assert 'AverageBpm="140.00"' in xml_text
+    assert 'Name="drop_1_start"' in xml_text
+
+
+def test_cli_parse_transition_template_writes_json(tmp_path, capsys) -> None:
+    template_path = tmp_path / "recipe.txt"
+    template_path.write_text(
+        """
+kind: generic_transition
+type: reverb_exit
+recipe_id: manual-recipe
+notes: Reverb tail transition
+anchor: a_reverb_start = song_a.drop_end - 1 bar
+anchor: a_drop_end = song_a.drop_end
+anchor: b_first = song_b.first_beat
+action: a.reverbWet at a_reverb_start = 1 straight
+""",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "recipe.json"
+
+    exit_code = main(["parse-transition-template", str(template_path), "--out", str(output_path), "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    recipe = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["artifact"] == "transition-recipe"
+    assert recipe["recipeId"] == "manual-recipe"
+
+
+def test_cli_gain_plan_drop_switch_writes_report_and_adjusted_plan(tmp_path, capsys) -> None:
+    sample_rate = 8_000
+    _write_cli_gain_wav(tmp_path / "outgoing.wav", sample_rate=sample_rate, amplitude=0.35)
+    _write_cli_gain_wav(tmp_path / "incoming.wav", sample_rate=sample_rate, amplitude=0.45)
+    plan_path = _write_cli_gain_plan(tmp_path)
+    original = json.loads(plan_path.read_text(encoding="utf-8"))
+    out_path = tmp_path / "mix-plan-gain-planned.json"
+    report_path = tmp_path / "energy-report.json"
+
+    exit_code = main(
+        [
+            "gain-plan-drop-switch",
+            str(plan_path),
+            "--out",
+            str(out_path),
+            "--report",
+            str(report_path),
+            "--asset-root",
+            str(tmp_path),
+            "--sample-rate",
+            str(sample_rate),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    planned = json.loads(out_path.read_text(encoding="utf-8"))
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["artifact"] == "mixplan-drop-switch-gain-plan"
+    assert report["artifact"] == "mixplan-drop-switch-energy-report"
+    assert planned["transitions"][0]["sourceAnchors"] == original["transitions"][0]["sourceAnchors"]
 
 
 @pytest.mark.analysis

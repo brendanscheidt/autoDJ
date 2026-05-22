@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "autodj.transition-recipe.v1",
+  "title": "AutoDJ Transition Recipe v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "recipeId",
+    "transitionFamily",
+    "semanticRequirements",
+    "anchors",
+    "automation"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "recipeId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "transitionFamily": {
+      "enum": [
+        "drop_switch",
+        "double_drop",
+        "reverb_exit",
+        "custom"
+      ]
+    },
+    "semanticRequirements": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "exactBpmRequired",
+        "requiredAnchors"
+      ],
+      "properties": {
+        "exactBpmRequired": {
+          "type": "boolean"
+        },
+        "camelotKeyCompatibility": {
+          "type": "string"
+        },
+        "requiredAnchors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "energyNotes": {
+          "type": "string"
+        },
+        "humanNotes": {
+          "type": "string"
+        }
+      }
+    },
+    "anchors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/recipeAnchor"
+      }
+    },
+    "automation": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/automationLane"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "deckId": {
+      "enum": [
+        "a",
+        "b"
+      ]
+    },
+    "recipeAnchor": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "deck",
+        "semanticRef"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deck": {
+          "$ref": "#/$defs/deckId"
+        },
+        "semanticRef": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "automationLane": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "deck",
+        "control",
+        "keyframes"
+      ],
+      "properties": {
+        "deck": {
+          "$ref": "#/$defs/deckId"
+        },
+        "control": {
+          "enum": [
+            "volume",
+            "eqLow",
+            "eqMid",
+            "eqHigh",
+            "reverbWet",
+            "echoWet",
+            "reverbTailGain",
+            "play",
+            "stop"
+          ]
+        },
+        "keyframes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/recipeKeyframe"
+          }
+        }
+      }
+    },
+    "recipeKeyframe": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "anchor",
+        "offsetBeats",
+        "value"
+      ],
+      "properties": {
+        "anchor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offsetBeats": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "interpolation": {
+          "enum": [
+            "hold",
+            "linear",
+            "smoothstep",
+            "exponential"
+          ]
+        }
+      }
+    }
+  }
+}

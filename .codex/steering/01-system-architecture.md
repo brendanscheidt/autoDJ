@@ -6,6 +6,7 @@
 AudioRepository
   -> GenreAnalyzer
   -> TrackAnalyzer / AnalysisWorker
+  -> SemanticCueProvider
   -> MetadataCache
   -> DJStrategy
   -> MixPlan
@@ -73,6 +74,23 @@ Responsibilities:
 
 The analysis worker may be Python while playback is C++. Treat it as a separate
 process boundary unless there is a strong reason to embed it later.
+
+### SemanticCueProvider
+
+Normalizes section and cue labels before DJ planning.
+
+Responsibilities:
+
+- Convert provider-specific evidence into canonical `AnalyzedTrack.sections`
+  and `AnalyzedTrack.cuePoints`.
+- Support Rekordbox XML hot-cue labels as the current trusted POC oracle.
+- Keep automatic semantic backends such as `dubstep-phrase-hybrid`, CUE-DETR,
+  EDM-98, All-In-One, or SongFormer behind the same contract.
+- Preserve provenance, confidence, and warnings so bad transitions can be traced
+  to a specific cue source.
+
+Boundary rule: DJ strategies consume normalized analyzed-track sections/cues.
+They should not parse Rekordbox XML or model-specific raw outputs directly.
 
 ### MetadataCache
 
@@ -193,8 +211,8 @@ Not required for the MVP, but the architecture should allow rendering a
 2. Repository emits `RepositoryTrack` records.
 3. Stub genre analyzer marks them as `dubstep`.
 4. Analysis worker generates `AnalyzedTrack` artifacts.
-5. Metadata cache stores artifacts.
-6. Dubstep DJ strategy creates a `MixPlan`.
-7. Playback engine validates and executes the plan.
-8. UI visualizes playback state and debug annotations.
-
+5. Optional semantic cue providers override or augment sections/cues.
+6. Metadata cache stores artifacts.
+7. Dubstep DJ strategy creates a `MixPlan`.
+8. Playback engine validates and executes the plan.
+9. UI visualizes playback state and debug annotations.

@@ -15,15 +15,20 @@ mobile-safe library implementation.
 Spec 005 selected the current analysis direction:
 
 - BPM/beatgrid: `current-autodj-signal`.
-- Semantic sections: `dubstep-phrase-hybrid`.
-- Section fallback: `current-autodj-signal` rough sections only when the
-  selected semantic backend cannot run or emits no usable sections.
+- Automatic semantic sections: `dubstep-phrase-hybrid` remains the best
+  available project-owned experimental backend, but it is not accurate enough
+  to be the trusted source for generated drop-switch planning.
+- Current POC semantic oracle: Rekordbox XML hot-cue labels applied into
+  `AnalyzedTrack.sections` and `AnalyzedTrack.cuePoints`.
+- Section fallback: `current-autodj-signal` rough sections only when no better
+  semantic source is available and the caller explicitly accepts fallback
+  behavior.
 
 `dubstep-phrase-hybrid` uses the selected beatgrid, energy/bass/onset curves,
 All-In-One structural boundaries, SongFormer structural boundaries, and
-dubstep phrase heuristics. It is the default `analyze-batch` semantic backend
-for the POC. Rekordbox XML remains evaluation truth only and must not be passed
-into normal artifact generation.
+dubstep phrase heuristics. It can generate candidate sections for unlabeled
+tracks and future model training, but manual Rekordbox labels are preferred for
+the current transition-intelligence work.
 
 ## MVP Pipeline
 
@@ -123,9 +128,15 @@ Outputs:
 - Ordered drop instances should use repeated `drop` sections with stable IDs or
   indices, not labels such as `drop1` or `drop2`.
 
-Selected POC approach:
+Current POC approach:
 
-- Use `dubstep-phrase-hybrid` as the default section backend.
+- Use Rekordbox XML hot-cue labels as a semantic oracle when manually labeled
+  cues are available.
+- Use names like `build_1_start`, `drop_1_start`, `drop_1_end`, and
+  `break_1_start`; the parser accepts canonical section labels ending in
+  `_start` or `_end`.
+- Use `dubstep-phrase-hybrid` as an automatic candidate/fallback backend, not
+  as the final authority for high-risk transitions.
 - Use All-In-One and SongFormer as boundary evidence providers, not as final
   DJ-label authorities.
 - Promote pop-form labels such as chorus/bridge/instrumental only with
@@ -147,6 +158,18 @@ Fallback:
 - `--section-backend current-autodj-signal` is acceptable for quick smoke tests
   without heavy semantic ML dependencies, but it is not the selected section
   path.
+
+Provider boundary:
+
+- Rekordbox XML, `dubstep-phrase-hybrid`, CUE-DETR, EDM-98, All-In-One,
+  SongFormer, and future trained models must be converted into the same
+  analyzed-track section/cue shape before planning.
+- Strategy code should choose transitions from canonical `AnalyzedTrack`
+  sections/cues and confidence/provenance fields, not from provider-specific
+  objects.
+- Existing CUE-DETR and EDM-98 code is research-only. They are useful as
+  candidate sources for a future supervised model, but smoke benchmarks did not
+  justify making either one the default semantic source.
 
 Deferred comparison systems:
 
@@ -322,4 +345,4 @@ The UI should be able to show:
 - Confidence values.
 
 If a generated transition sounds bad, the first debugging question should be:
-"Was the analysis wrong, or was the DJ decision wrong?"
+"Was the semantic cue source wrong, or was the DJ decision wrong?"

@@ -69,6 +69,12 @@ The strategy works best when each `AnalyzedTrack` includes:
 Each feature must have confidence. The strategy should prefer simple transitions
 when confidence is low.
 
+For the current POC, semantic section confidence should come from manually
+labeled Rekordbox XML when available. Automatic semantic backends may populate
+the same fields, but high-risk transitions such as drop switches should treat
+machine-only drop labels as provisional until the future trained drop-start
+model is accepted.
+
 For dubstep, repeated drops should be addressed by order within the track:
 drop 1, drop 2, drop 3, and so on. Use canonical section labels in artifacts
 and carry the order in section IDs/indices. Treat `break` as the canonical
@@ -117,13 +123,20 @@ Use when:
 - Song 1 has a high-confidence second build and known bar count until drop 2.
 - Song 2 has a compatible build 1 and drop 1.
 - The two builds can be aligned so both drops land on the same downbeat.
+- The normalized BPM values are exactly equal for the POC. Do not apply BPM
+  tolerance or time-stretching until a dedicated tempo-control backend exists.
 
 Typical automation:
 
 - Count bars from song 1 build 2 start to song 1 drop 2.
 - Start song 2 build 1 the same number of bars before its drop.
-- Fade song 1 out so it is fully gone one bar before the drop.
-- Let song 2 own the pre-drop bar and drop.
+- Bring song 2 up during the first half of the aligned build.
+- Hand low-end ownership from song 1 to song 2 at the build midpoint.
+- Keep both builds audible after the midpoint.
+- Cut song 1 one bar before the aligned drop so song 2 owns the predrop and
+  drop.
+- Apply transient nudge to the incoming source around the transition anchors so
+  kicks/transients line up by ear.
 
 ### Drop Double
 
@@ -267,7 +280,8 @@ weight beat-grid confidence more heavily than key compatibility.
 
 High score:
 
-- Normalized BPM delta <= 1%.
+- Exact normalized BPM match for drop switches in the current POC.
+- Normalized BPM delta <= 1% for simpler non-time-stretched transitions.
 - Beat grid confidence is high.
 
 Medium score:
@@ -339,14 +353,17 @@ Low score:
 
 1. Filter tracks by minimum analysis quality.
 2. Normalize tempo and key fields.
-3. Generate candidate cue points if missing.
-4. Build transition candidates between compatible track pairs.
-5. Score candidates by template-specific rules.
-6. Select an energy arc for the set.
-7. Choose track sequence using transition scores and energy goals.
-8. Compile selected transitions into deck commands and automation lanes.
-9. Validate resulting `MixPlan`.
-10. Emit annotations explaining selected and rejected transitions.
+3. Load or choose a semantic cue provider. Prefer Rekordbox-labeled
+   `AnalyzedTrack` artifacts for the current POC.
+4. Generate candidate cue points only when accepted semantic labels are missing.
+5. Build transition candidates between compatible track pairs.
+6. Score candidates by template-specific rules, including energy compatibility
+   and transient-nudge diagnostics for drop switches.
+7. Select an energy arc for the set.
+8. Choose track sequence using transition scores and energy goals.
+9. Compile selected transitions into deck commands and automation lanes.
+10. Validate resulting `MixPlan`.
+11. Emit annotations explaining selected and rejected transitions.
 
 ## Energy Arc
 

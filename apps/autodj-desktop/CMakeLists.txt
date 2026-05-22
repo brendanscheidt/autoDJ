@@ -36,6 +36,7 @@ target_link_libraries(autodj_desktop
         autodj_dj
         autodj_playback
         autodj_repository
+        juce::juce_audio_utils
         juce::juce_gui_extra
 )
 
@@ -52,3 +53,20 @@ target_compile_features(autodj_desktop_placeholder_tests PRIVATE cxx_std_20)
 
 add_test(NAME autodj_desktop_placeholder_tests COMMAND autodj_desktop_placeholder_tests)
 
+add_executable(autodj_desktop_transition_authoring_model_tests
+    tests/transition_authoring_model_tests.cpp
+)
+
+target_include_directories(autodj_desktop_transition_authoring_model_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(autodj_desktop_transition_authoring_model_tests
+    PRIVATE
+        autodj_playback
+)
+
+target_compile_features(autodj_desktop_transition_authoring_model_tests PRIVATE cxx_std_20)
+
+add_test(NAME autodj_desktop_transition_authoring_model_tests COMMAND autodj_desktop_transition_authoring_model_tests)

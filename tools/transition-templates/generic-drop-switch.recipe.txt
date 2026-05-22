@@ -1,0 +1,27 @@
+# Copy this file when you discover a reusable drop-switch technique.
+# Generic recipes keep semantic anchors and expressions instead of exact song timestamps.
+
+kind: generic_transition
+type: drop_switch
+recipe_id: manual-drop-switch-layered-build-v1
+notes: Use when two exact-BPM songs have compatible build tension and incoming drop impact.
+energy_notes: Incoming drop should not feel weaker than the layered build.
+camelot_key_compatibility: placeholder
+require: same_bpm
+require: song_a.second_build
+require: song_a.second_drop
+require: song_b.first_drop
+
+anchor: a_start = song_a.second_build.start
+anchor: a_drop = song_a.second_drop.start
+anchor: a_cut = a_drop - 1 bar
+anchor: b_drop = song_b.first_drop.start
+anchor: b_start = b_drop - distance(a_start, a_drop)
+anchor: midpoint = midpoint(a_start, a_drop)
+
+action: b.volume at b_start = 0 instant
+action: b.volume at midpoint = 1 smooth
+action: b.eqLow at b_start = 0 instant
+action: b.eqLow at midpoint = 1 instant
+action: a.eqLow at midpoint = 0 instant
+action: a.volume at a_cut = 0 instant
