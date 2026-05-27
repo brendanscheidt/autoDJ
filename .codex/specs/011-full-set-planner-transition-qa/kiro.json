@@ -1,0 +1,53 @@
+{
+  "id": "011-full-set-planner-transition-qa",
+  "title": "Full-Set Planner And Transition QA",
+  "specStyle": "kiro-implementation",
+  "status": "draft",
+  "sourceSpec": "../011-full-set-planner-transition-qa.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/05-dubstep-dj-strategy.md",
+    "../../steering/06-playback-engine.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "decisionGates": [
+    {
+      "id": "preview-pack-verdict",
+      "description": "After generating transition preview WAVs and reports, stop for user listening verdict before rendering another full set."
+    },
+    {
+      "id": "full-set-verdict",
+      "description": "After rendering a validated full set, stop for user verdict on transition quality, song ordering, wash-out frequency, and energy continuity."
+    }
+  ],
+  "subagentExecutionRules": [
+    "Read this kiro.json, requirements.md, design.md, tasks.md, and all required steering context before executing tasks.",
+    "Do not change the accepted drop-switch or wash-out DSP formulas unless a task explicitly calls for a bug fix.",
+    "Use Rekordbox-labeled analyzed artifacts as semantic truth for this spec.",
+    "Use selected in-house key output and Camelot compatibility for drop-switch candidate gating.",
+    "Use SoundStretch only inside the configured tempo-stretch gate, and record every stretched placement in reports.",
+    "Generate preview WAVs before full-set WAVs so user review can catch bad transitions cheaply.",
+    "Fail planning or render preparation on state leaks, wet drop-switch FX, outgoing placement overruns, missing assets, or unsupported tempo plans.",
+    "Keep generated WAVs, reports, and local audition artifacts under ignored cache paths.",
+    "Stop at manual decision gates and record the user's verdict before marking those tasks complete."
+  ],
+  "verificationCommands": {
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug --output-on-failure",
+    "contractValidation": "ctest --preset debug -R autodj_contract_examples --output-on-failure",
+    "pythonTests": "wsl -d Ubuntu-24.04 -- bash -lc \"cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && pytest analysis/worker-python/tests\""
+  }
+}
+
