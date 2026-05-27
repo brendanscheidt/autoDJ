@@ -243,6 +243,55 @@ def test_render_mix_plan_low_eq_restore_changes_bass_energy(tmp_path: Path) -> N
     assert restored_region > low_cut_region * 2.0
 
 
+def test_render_mix_plan_synthesizes_generated_washout_sweep_asset(tmp_path: Path) -> None:
+    sample_rate = 8_000
+    plan = {
+        "schemaVersion": "1.0.0",
+        "planId": "plan-generated-sweep-test",
+        "createdAtUtc": "2026-01-01T00:00:00Z",
+        "strategy": {"strategyId": "test", "strategyVersion": "1.0.0"},
+        "assets": [
+            {
+                "trackId": "washout-sweep-fx",
+                "sourceUri": "generated://autodj/fx/washout-sweep-v1.wav",
+                "formatHint": "wav",
+                "durationSeconds": 1.0,
+            }
+        ],
+        "tracks": [
+            {
+                "placementId": "place-sweep",
+                "trackId": "washout-sweep-fx",
+                "deck": 3,
+                "sourceStartSeconds": 0.45,
+                "sourceEndSeconds": 0.55,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 0.1,
+                "role": "fx",
+            }
+        ],
+        "transitions": [],
+        "commands": [
+            {"type": "load", "at": 0.0, "deck": 3, "trackId": "washout-sweep-fx", "cueSeconds": 0.45},
+            {"type": "play", "at": 0.0, "deck": 3},
+        ],
+    }
+    plan_path = tmp_path / "mix-plan-generated-sweep.json"
+    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+    result = render_mix_plan_file(
+        plan_path,
+        tmp_path / "render",
+        RenderOptions(sample_rate=sample_rate, asset_root=tmp_path, output_gain=1.0),
+    )
+
+    generated = tmp_path / "render" / "generated-assets" / "washout-sweep-v1-8000hz-1000ms.wav"
+    wav_sample_rate, samples = _read_wav_samples(result.output_wav)
+    assert generated.exists()
+    assert wav_sample_rate == sample_rate
+    assert _peak(samples, wav_sample_rate, 0.0, 0.1) > 0.01
+
+
 def test_render_mix_plan_rejects_missing_assets(tmp_path: Path) -> None:
     plan_path = tmp_path / "mix-plan.json"
     plan_path.write_text(
@@ -373,6 +422,97 @@ def test_render_mix_plan_applies_constant_tempo_plan_before_existing_automation(
     assert first_window > 0.5
     assert summary["tempoStretchReports"][0]["trackId"] == "incoming"
     assert summary["tempoStretchReports"][0]["requiresRenderedBpmValidation"] is True
+
+
+def test_render_mix_plan_uses_target_bpm_bias_when_mapping_stretched_source_offsets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample_rate = 8_000
+    source = [0.0] * sample_rate
+    source[round(0.24 * sample_rate)] = 1.0
+    stretched = [0.0] * (sample_rate * 2)
+    stretched[round(0.40 * sample_rate)] = 1.0
+    _write_wav(tmp_path / "incoming.wav", source, sample_rate)
+
+    class _FakeStretchResult:
+        output_path: Path
+
+        def __init__(self, output_path: Path) -> None:
+            self.output_path = output_path
+
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "backendName": "soundstretch",
+                "sourceBpm": 100.0,
+                "targetBpm": 50.0,
+                "targetBpmBias": 10.0,
+                "tempoRatio": 0.6,
+                "outputPath": str(self.output_path),
+            }
+
+    def fake_stretch_audio_file(
+        audio_path: Path,
+        output_wav: Path,
+        *,
+        report_path: Path | None,
+        options: object,
+    ) -> _FakeStretchResult:
+        assert audio_path == tmp_path / "incoming.wav"
+        assert getattr(options, "target_bpm_bias") == 10.0
+        _write_wav(output_wav, stretched, sample_rate)
+        if report_path is not None:
+            report_path.write_text("{}", encoding="utf-8")
+        return _FakeStretchResult(output_wav)
+
+    monkeypatch.setattr(mixplan_renderer, "stretch_audio_file", fake_stretch_audio_file)
+    plan = {
+        "schemaVersion": "1.0.0",
+        "planId": "plan-tempo-bias-render-test",
+        "createdAtUtc": "2026-01-01T00:00:00Z",
+        "strategy": {"strategyId": "test", "strategyVersion": "1.0.0"},
+        "assets": [
+            {"trackId": "incoming", "sourceUri": "incoming.wav", "formatHint": "wav", "sourceBpm": 100.0},
+        ],
+        "tracks": [
+            {
+                "placementId": "place-incoming",
+                "trackId": "incoming",
+                "deck": 1,
+                "sourceStartSeconds": 0.24,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 0.08,
+                "role": "incoming",
+                "tempoPlan": {
+                    "sourceBpm": 100.0,
+                    "targetBpm": 50.0,
+                    "targetBpmBias": 10.0,
+                    "tempoRatio": 0.5,
+                    "preservePitch": True,
+                    "backend": "soundstretch",
+                    "requiresRenderedBpmValidation": True,
+                },
+            }
+        ],
+        "transitions": [],
+        "commands": [
+            {"type": "load", "at": 0.0, "deck": 1, "trackId": "incoming", "cueSeconds": 0.24},
+            {"type": "play", "at": 0.0, "deck": 1},
+        ],
+    }
+    plan_path = tmp_path / "mix-plan-tempo-bias.json"
+    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+    result = render_mix_plan_file(
+        plan_path,
+        tmp_path / "render",
+        RenderOptions(sample_rate=sample_rate, asset_root=tmp_path, output_gain=1.0),
+    )
+
+    wav_sample_rate, samples = _read_wav_samples(result.output_wav)
+    first_window = _peak(samples, wav_sample_rate, 0.0, 0.02)
+    assert first_window > 0.5
 
 
 def test_render_mix_plan_rejects_dynamic_tempo_ramps_until_supported(tmp_path: Path) -> None:

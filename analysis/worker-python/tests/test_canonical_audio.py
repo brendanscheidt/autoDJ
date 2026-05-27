@@ -9,6 +9,7 @@ from autodj_analysis.canonical_audio import (
     CANONICAL_AUDIO_FILENAME,
     CANONICAL_AUDIO_METADATA_FILENAME,
     CanonicalAudioError,
+    CanonicalAudioOptions,
     canonical_audio_paths,
     canonicalize_audio_file,
     canonicalize_repository_manifest,
@@ -125,6 +126,35 @@ def test_canonicalize_audio_file_skips_fresh_artifact(tmp_path: Path) -> None:
     assert first.status == "canonicalized"
     assert second.status == "skipped"
     assert runner.decode_count == 1
+
+
+def test_canonicalize_audio_file_regenerates_when_sample_rate_options_change(tmp_path: Path) -> None:
+    source = tmp_path / "song.mp3"
+    _write_source(source)
+    runner = _FakeFfmpeg()
+    output_root = tmp_path / "canonical"
+
+    first = canonicalize_audio_file(
+        source,
+        output_root,
+        track_id="song-1",
+        options=CanonicalAudioOptions(target_sample_rate=44_100),
+        command_runner=runner,
+        probe_runner=_probe_runner(sample_rate=44_100),
+    )
+    second = canonicalize_audio_file(
+        source,
+        output_root,
+        track_id="song-1",
+        options=CanonicalAudioOptions(target_sample_rate=48_000),
+        command_runner=runner,
+        probe_runner=_probe_runner(sample_rate=44_100),
+    )
+
+    assert first.status == "canonicalized"
+    assert second.status == "canonicalized"
+    assert second.sample_rate == 48_000
+    assert runner.decode_count == 2
 
 
 def test_canonicalize_audio_file_regenerates_when_source_hash_changes(tmp_path: Path) -> None:

@@ -23,6 +23,8 @@ from .tempo_stretch import TempoStretchError, TempoStretchOptions, stretch_audio
 
 DEFAULT_RENDER_SAMPLE_RATE = 44_100
 DEFAULT_LOW_CUTOFF_HZ = 180.0
+GENERATED_WASHOUT_SWEEP_URI = "generated://autodj/fx/washout-sweep-v1.wav"
+DEFAULT_GENERATED_WASHOUT_SWEEP_DURATION_SECONDS = 7.68
 
 
 class MixPlanRenderError(ValueError):
@@ -316,7 +318,13 @@ def _load_asset_bands(
     if asset is None:
         raise MixPlanRenderError("missing_asset", f"MixPlan has no asset entry for trackId: {track_id}")
     source_uri = _required_string(asset, "sourceUri")
-    source_path = _resolve_source_path(source_uri, mix_plan_path=mix_plan_path, asset_root=options.asset_root)
+    source_path = _source_path_for_asset(
+        asset,
+        source_uri,
+        mix_plan_path=mix_plan_path,
+        out_dir=out_dir,
+        options=options,
+    )
     source_path, tempo_report = _tempo_stretched_source_path(
         track_id,
         source_path,
@@ -327,6 +335,59 @@ def _load_asset_bands(
     audio = _load_audio(source_path, sample_rate=options.sample_rate)
     low_band, high_band = _split_low_high(audio.samples, sample_rate=audio.sample_rate, cutoff_hz=options.low_cutoff_hz)
     return audio, low_band, high_band, tempo_report
+
+
+def _source_path_for_asset(
+    asset: dict[str, Any],
+    source_uri: str,
+    *,
+    mix_plan_path: Path,
+    out_dir: Path,
+    options: RenderOptions,
+) -> Path:
+    if source_uri == GENERATED_WASHOUT_SWEEP_URI:
+        duration_seconds = _optional_number(asset, "durationSeconds") or DEFAULT_GENERATED_WASHOUT_SWEEP_DURATION_SECONDS
+        if duration_seconds <= 0.0:
+            raise MixPlanRenderError("invalid_generated_asset", "Generated wash-out sweep duration must be greater than zero")
+        generated_path = _generated_washout_sweep_path(
+            out_dir,
+            sample_rate=options.sample_rate,
+            duration_seconds=duration_seconds,
+        )
+        if not generated_path.exists():
+            _write_generated_washout_sweep(
+                generated_path,
+                sample_rate=options.sample_rate,
+                duration_seconds=duration_seconds,
+            )
+        return generated_path
+    return _resolve_source_path(source_uri, mix_plan_path=mix_plan_path, asset_root=options.asset_root)
+
+
+def _generated_washout_sweep_path(out_dir: Path, *, sample_rate: int, duration_seconds: float) -> Path:
+    duration_ms = round(duration_seconds * 1000.0)
+    return out_dir / "generated-assets" / f"washout-sweep-v1-{sample_rate}hz-{duration_ms}ms.wav"
+
+
+def _write_generated_washout_sweep(path: Path, *, sample_rate: int, duration_seconds: float) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    total_frames = max(1, round(duration_seconds * sample_rate))
+    samples: list[float] = []
+    phase = 0.0
+    for frame in range(total_frames):
+        progress = frame / max(1, total_frames - 1)
+        frequency = 170.0 + 4_800.0 * (progress**1.55)
+        phase += 2.0 * math.pi * frequency / sample_rate
+        swell = math.sin(math.pi * progress)
+        peak = math.exp(-((progress - 0.5) / 0.23) ** 2)
+        envelope = max(0.0, swell) ** 0.72 * (0.38 + 0.62 * peak)
+        shimmer = (
+            math.sin(phase)
+            + 0.42 * math.sin(phase * 1.997 + 0.3)
+            + 0.22 * math.sin(phase * 3.013 + 1.1)
+        )
+        samples.append(0.34 * envelope * shimmer)
+    _write_pcm16_mono_wav(path, samples, sample_rate, output_gain=1.0)
 
 
 def _tempo_stretched_source_path(
@@ -405,18 +466,23 @@ def _tempo_plan_from_placement(placement: dict[str, Any]) -> dict[str, Any] | No
 def _tempo_ratio_from_plan(tempo_plan: dict[str, Any] | None) -> float | None:
     if not tempo_plan:
         return None
+    source_bpm = _optional_number(tempo_plan, "sourceBpm")
+    target_bpm = _optional_number(tempo_plan, "targetBpm")
+    target_bpm_bias = float(tempo_plan.get("targetBpmBias", 0.0) or 0.0)
+    if source_bpm is not None and target_bpm is not None:
+        effective_target_bpm = target_bpm + target_bpm_bias
+        if source_bpm <= 0.0 or effective_target_bpm <= 0.0:
+            raise MixPlanRenderError(
+                "invalid_tempo_plan",
+                "tempoPlan sourceBpm and effective targetBpm must be greater than zero",
+            )
+        return effective_target_bpm / source_bpm
     ratio = _optional_number(tempo_plan, "tempoRatio")
     if ratio is not None:
         if ratio <= 0.0:
             raise MixPlanRenderError("invalid_tempo_ratio", "tempoPlan.tempoRatio must be greater than zero")
         return ratio
-    source_bpm = _optional_number(tempo_plan, "sourceBpm")
-    target_bpm = _optional_number(tempo_plan, "targetBpm")
-    if source_bpm is None or target_bpm is None:
-        return None
-    if source_bpm <= 0.0 or target_bpm <= 0.0:
-        raise MixPlanRenderError("invalid_tempo_plan", "tempoPlan sourceBpm and targetBpm must be greater than zero")
-    return target_bpm / source_bpm
+    return None
 
 
 def _tempo_cache_key(tempo_plan: dict[str, Any] | None) -> str:

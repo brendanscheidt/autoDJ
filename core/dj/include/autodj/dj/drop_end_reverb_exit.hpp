@@ -29,7 +29,7 @@ struct DropEndReverbExitOptions final {
     bool includeWashSweep{true};
     int washSweepDeck{3};
     std::string washSweepTrackId{"washout-sweep-fx"};
-    std::string washSweepSourceUri{"fixtures/audio/fx/washout-sweep.wav"};
+    std::string washSweepSourceUri{"generated://autodj/fx/washout-sweep-v1.wav"};
     std::string washSweepFormatHint{"wav"};
     double washSweepDurationSeconds{7.68};
     double washSweepPeakOffsetSeconds{3.8400907029478457};

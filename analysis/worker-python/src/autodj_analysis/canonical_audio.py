@@ -21,7 +21,8 @@ from .probe import ProbeError, ProbeRunner, probe_audio
 CANONICAL_AUDIO_FILENAME = "canonical.wav"
 CANONICAL_AUDIO_METADATA_FILENAME = "canonical-audio.json"
 CANONICAL_AUDIO_PRODUCER = "autodj_analysis.canonical_audio"
-CANONICAL_AUDIO_PARAMETERS_HASH = "sha256:canonical-pcm-v1-ffmpeg-mono-pcm16"
+CANONICAL_AUDIO_PARAMETERS_VERSION = "canonical-pcm-v1-ffmpeg-mono-pcm16"
+CANONICAL_AUDIO_PARAMETERS_HASH = f"sha256:{CANONICAL_AUDIO_PARAMETERS_VERSION}"
 CANONICAL_TIMELINE_POLICY = "shared-canonical-pcm"
 CANONICAL_SUPPORTED_SAMPLE_RATES = frozenset({44_100, 48_000})
 CANONICAL_FALLBACK_SAMPLE_RATE = 44_100
@@ -220,7 +221,8 @@ def canonicalize_audio_file(
             "Manifest content hash differed from the source file hash; canonical artifact uses the actual file hash."
         )
 
-    if not options.force and _metadata_is_fresh(paths.metadata_path, paths.audio_path, source_hash):
+    parameters_hash = canonical_audio_parameters_hash(options)
+    if not options.force and _metadata_is_fresh(paths.metadata_path, paths.audio_path, source_hash, parameters_hash):
         metadata = _read_metadata(paths.metadata_path)
         return CanonicalAudioResult(
             track_id=track_id,
@@ -277,7 +279,7 @@ def canonicalize_audio_file(
         "sourcePath": str(source),
         "sourceUri": source_uri or str(source),
         "sourceContentHash": source_hash,
-        "parametersHash": CANONICAL_AUDIO_PARAMETERS_HASH,
+        "parametersHash": parameters_hash,
         "canonicalPath": str(paths.audio_path),
         "timelinePolicy": CANONICAL_TIMELINE_POLICY,
         "decoder": {
@@ -308,14 +310,29 @@ def canonicalize_audio_file(
     )
 
 
-def _metadata_is_fresh(metadata_path: Path, canonical_path: Path, source_hash: str) -> bool:
+def canonical_audio_parameters_hash(options: CanonicalAudioOptions) -> str:
+    payload = {
+        "version": CANONICAL_AUDIO_PARAMETERS_VERSION,
+        "targetSampleRate": options.target_sample_rate,
+        "fallbackSampleRate": options.fallback_sample_rate,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _metadata_is_fresh(
+    metadata_path: Path,
+    canonical_path: Path,
+    source_hash: str,
+    parameters_hash: str,
+) -> bool:
     if not metadata_path.exists() or not canonical_path.exists():
         return False
     metadata = _read_metadata(metadata_path)
     return (
         metadata.get("artifactType") == "canonical-audio"
         and metadata.get("sourceContentHash") == source_hash
-        and metadata.get("parametersHash") == CANONICAL_AUDIO_PARAMETERS_HASH
+        and metadata.get("parametersHash") == parameters_hash
         and metadata.get("canonicalPath") == str(canonical_path)
     )
 
@@ -456,4 +473,3 @@ def _optional_float(value: Any) -> float | None:
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-

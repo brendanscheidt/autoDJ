@@ -56,7 +56,6 @@ audio-imports/
 local-audio/
 *.mp3
 *.wav
-!fixtures/audio/fx/washout-sweep.wav
 *.flac
 *.aiff
 *.aif

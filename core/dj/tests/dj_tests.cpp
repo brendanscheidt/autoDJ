@@ -591,7 +591,7 @@ void drop_end_reverb_exit_generates_full_ramp_fragment() {
 
     assert(fragment.assets.size() == 1);
     assert(fragment.assets[0].trackId.value == "washout-sweep-fx");
-    assert(fragment.assets[0].sourceUri == "fixtures/audio/fx/washout-sweep.wav");
+    assert(fragment.assets[0].sourceUri == "generated://autodj/fx/washout-sweep-v1.wav");
     assert(nearly_equal(fragment.assets[0].durationSeconds.value(), sweepDurationSeconds));
 
     assert(fragment.placements.size() == 3);
