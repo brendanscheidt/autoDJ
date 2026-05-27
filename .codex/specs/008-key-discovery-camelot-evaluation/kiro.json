@@ -1,0 +1,55 @@
+{
+  "id": "008-key-discovery-camelot-evaluation",
+  "title": "Key Discovery And Camelot Evaluation",
+  "specStyle": "kiro-implementation",
+  "status": "draft",
+  "sourceSpec": "../008-key-discovery-camelot-evaluation.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/05-dubstep-dj-strategy.md",
+    "../../steering/06-playback-engine.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "decisionGates": [
+    {
+      "id": "candidate-install-verdict",
+      "description": "After candidate key detector install smoke tests, report which backends are genuinely runnable before benchmarking."
+    },
+    {
+      "id": "key-benchmark-verdict",
+      "description": "After benchmarking candidate detectors against Rekordbox Tonality truth, stop for user review before selecting the default detector or ensemble."
+    },
+    {
+      "id": "first-key-scored-transition-batch",
+      "description": "After generating the first transition candidate report using AutoDJ-detected keys, ask whether the scoring feels musically useful before enabling strict key rejections."
+    }
+  ],
+  "subagentExecutionRules": [
+    "Read this kiro.json, requirements.md, design.md, tasks.md, and all required steering context before executing tasks.",
+    "Treat Rekordbox XML Tonality as benchmark ground truth only, not the production key source.",
+    "Do not leave candidate key detectors as graceful-failure placeholders; install and smoke-test each selected candidate before benchmarking it.",
+    "Keep key detectors modular so candidate backends and future native implementations can be swapped.",
+    "Record processing time and install/runtime constraints for every candidate.",
+    "Do not add pitch shifting, key sync, or time-stretch behavior in this spec.",
+    "Do not commit local Rekordbox XML exports, real songs, rendered mixes, model downloads, or generated cache artifacts.",
+    "Stop at manual decision gates and record the user's verdict before marking those tasks complete."
+  ],
+  "verificationCommands": {
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug --output-on-failure",
+    "contractValidation": "ctest --preset debug -R autodj_contract_examples --output-on-failure",
+    "pythonTests": "wsl -d Ubuntu-24.04 -- bash -lc \"cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && pytest analysis/worker-python/tests\""
+  }
+}

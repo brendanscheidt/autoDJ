@@ -163,16 +163,29 @@ Target: 1 to 2 weeks.
 Current direction:
 
 - Use Rekordbox-labeled `AnalyzedTrack` artifacts as the semantic input.
-- Use exact normalized BPM matches for drop switches.
+- Prefer exact normalized BPM matches for drop switches. When exact matches are
+  not enough, allow SoundStretch-matched incoming tracks inside the configured
+  BPM gate.
+- Use compatible in-house Camelot keys for generated drop-switch pairs.
+- Use `selected-madmom-keyfinder` for AutoDJ key output; Rekordbox XML
+  `Tonality` values remain key benchmark truth only.
 - Use reverb exits or simpler cuts when BPM or semantic confidence does not
   support a drop switch.
 - Keep automatic semantic detection as a replaceable provider rather than a
   blocker for transition-intelligence work.
+- Current full-set POC status, 2026-05-27: generated set plans use pairwise
+  drop-switch and wash-out fragments, SoundStretch where needed, key-compatible
+  drop-switch candidate selection, transient nudge/gain planning, and hard-stop
+  placement truncation so old tracks do not keep playing under later
+  transitions. The generator now validates that outgoing placements end at stop
+  time and that drop-switch windows stay dry.
 
 Deliverables:
 
 - Candidate transition generation using selected beatgrid and section metadata.
-- BPM/key/phrase compatibility scoring.
+- BPM/key/phrase compatibility scoring. Confident distant Camelot clashes reject
+  the second-build drop-switch template; reverb exits keep warning-only key
+  behavior because dry overlap is short.
 - Intro/outro blend template.
 - Build-to-drop swap template.
 - Hard-cut fallback.
@@ -183,6 +196,71 @@ Success:
 - Generate a deterministic short set from analyzed tracks.
 - Audition generated transitions in the desktop app.
 - Bad transitions can be traced to analysis or strategy decisions.
+
+## Phase 5.5: Pitch-Preserving Tempo Control
+
+Target: next foundational playback/toolbox spec.
+
+Spec:
+
+- `.codex/specs/009-pitch-preserving-tempo-control.md`
+
+Deliverables:
+
+- Research and smoke-test serious Master-Tempo-style candidates: Rubber Band,
+  SoundTouch, Signalsmith Stretch, Superpowered, zplane elastique, and related
+  commercial SDKs where practical.
+- Add MixPlan fields and renderer support for target BPM, tempo ratio,
+  preserve-pitch intent, and tempo ramp metadata.
+- Render tempo-matched WAV auditions without changing musical key.
+- Keep transient nudge and beatgrid mapping correct after stretching.
+- Let the planner consider one-sided incoming SoundStretch drop switches when
+  the incoming deck can match the outgoing deck's BPM inside a configurable BPM
+  window. Midpoint bridge ramps remain a later extension.
+
+Success:
+
+- User-auditioned stretched drop-switch examples sound acceptable.
+- Default automatic planner window is documented and tunable.
+- The selected backend's licensing, quality, runtime, and mobile/native risks
+  are recorded.
+
+## Phase 5.6: Canonical PCM And Drop-Anchor Timing Refinement
+
+Target: immediately after Spec 009's first tempo-control pass.
+
+Deliverables:
+
+- Decode each source once to canonical PCM and use that same timing source for
+  analysis, waveform, nudge, render, and audition paths.
+- Audit timing-sensitive feature extraction for hidden sample-rate and
+  frame-centering shifts.
+- Build a drop-anchor candidate dataset from Rekordbox-labeled drop cues.
+- Score exact drop-start transients using HPSS/percussive, multiband onset,
+  low-band impact, bass persistence, and related DSP evidence.
+- Generate same-BPM drop-switch auditions before changing defaults.
+
+Success:
+
+- Refined drop anchors equal or beat the current nudge path on regression pairs
+  and improve known failure cases by user audition.
+
+## Phase 5.7: Pitch/Key Shift Without Tempo Change
+
+Target: after canonical timing work proves drop switches are stable.
+
+Deliverables:
+
+- Change key/Camelot by semitone steps without changing BPM.
+- Preserve tempo/beatgrid alignment while testing pitch-shift quality.
+- Integrate with Spec 008 key detection so harmonic compatibility can be
+  achieved by candidate selection or controlled key shift.
+- Keep formant/transient/stereo quality warnings explicit.
+
+Success:
+
+- A track can be shifted to a nearby Camelot-compatible key without disturbing
+  BPM-sensitive transitions.
 
 ## Phase 6: Loop Tighten And Drop-Focused Transitions
 

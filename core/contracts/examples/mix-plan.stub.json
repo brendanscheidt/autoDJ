@@ -13,21 +13,27 @@
       "sourceUri": "fixtures/track-stub-a.wav",
       "formatHint": "wav",
       "contentHash": "sha256:stub-a",
-      "durationSeconds": 224.0
+      "durationSeconds": 224.0,
+      "sourceBpm": 140.0,
+      "normalizedBpm": 140.0
     },
     {
       "trackId": "track-stub-b",
       "sourceUri": "fixtures/track-stub-b.wav",
       "formatHint": "wav",
       "contentHash": "sha256:stub-b",
-      "durationSeconds": 256.0
+      "durationSeconds": 256.0,
+      "sourceBpm": 150.0,
+      "normalizedBpm": 150.0
     },
     {
       "trackId": "track-stub-c",
       "sourceUri": "fixtures/track-stub-c.wav",
       "formatHint": "wav",
       "contentHash": "sha256:stub-c",
-      "durationSeconds": 192.0
+      "durationSeconds": 192.0,
+      "sourceBpm": 145.0,
+      "normalizedBpm": 145.0
     }
   ],
   "tracks": [
@@ -49,7 +55,24 @@
       "sourceEndSeconds": 240.0,
       "timelineStartSeconds": 96.0,
       "timelineEndSeconds": 272.0,
-      "role": "incoming"
+      "role": "incoming",
+      "tempoPlan": {
+        "sourceBpm": 150.0,
+        "targetBpm": 140.0,
+        "tempoRatio": 0.933333,
+        "preservePitch": true,
+        "backend": "soundstretch",
+        "backendVersion": "2.3.2",
+        "quality": "standard",
+        "renderedSourceUri": "fixtures/derived/track-stub-b-150-to-140.wav",
+        "renderedContentHash": "sha256:stub-b-tempo-140",
+        "targetBpmBias": 0.0,
+        "validationStatus": "pending",
+        "requiresRenderedBpmValidation": true,
+        "warnings": [
+          "Rendered tempo-matched assets must be reanalyzed or beat-spacing validated before long beat-locked overlap."
+        ]
+      }
     },
     {
       "placementId": "place-track-stub-c",
@@ -78,6 +101,7 @@
       "reasons": [
         "Stub song A exposes build 2 into drop 2",
         "Stub song B can start the same measure count before drop 1",
+        "Stub song B is rendered from 150 BPM to 140 BPM with preserve-pitch intent before the drop switch",
         "Outgoing deck is silent two measures before the aligned drop"
       ],
       "riskFlags": [
@@ -105,22 +129,39 @@
           "beatIndex": 192,
           "measureIndex": 48
         }
+      },
+      "tempoPlan": {
+        "sourceBpm": 150.0,
+        "targetBpm": 140.0,
+        "tempoRatio": 0.933333,
+        "preservePitch": true,
+        "backend": "soundstretch",
+        "backendVersion": "2.3.2",
+        "quality": "standard",
+        "renderedSourceUri": "fixtures/derived/track-stub-b-150-to-140.wav",
+        "renderedContentHash": "sha256:stub-b-tempo-140",
+        "targetBpmBias": 0.0,
+        "validationStatus": "pending",
+        "requiresRenderedBpmValidation": true,
+        "warnings": [
+          "The SoundStretch rendered file should be BPM-revalidated before this transition is trusted for final output."
+        ]
       }
     },
     {
-      "transitionId": "transition-drop-end-reverb-exit-stub",
+      "transitionId": "transition-drop-end-wash-out-stub",
       "fromPlacementId": "place-track-stub-b",
       "toPlacementId": "place-track-stub-c",
-      "technique": "drop_end_reverb_exit",
-      "templateId": "drop_end_reverb_exit_v1",
-      "timelineStartSeconds": 192.0,
-      "timelineEndSeconds": 240.0,
+      "technique": "wash_out",
+      "templateId": "drop_end_wash_out_v1",
+      "timelineStartSeconds": 222.4,
+      "timelineEndSeconds": 248.0,
       "handoffTimelineSeconds": 224.0,
-      "measureCountToTarget": 8,
+      "measureCountToTarget": 1,
       "score": 0.74,
       "reasons": [
         "Stub song B has no reliable second build/drop pair",
-        "Fallback exits the active drop with low-EQ reduction and post-fader reverb",
+        "Fallback exits the active drop with a four-beat low-cut and high-density post-fader wash",
         "Stub song C starts from its first beatgrid beat after initial silence"
       ],
       "riskFlags": [
@@ -171,6 +212,26 @@
       "type": "play",
       "at": 96.0,
       "deck": 2
+    },
+    {
+      "type": "automate",
+      "deck": 2,
+      "control": "tempo",
+      "effectParameters": {
+        "sourceBpm": 150.0,
+        "targetBpm": 140.0,
+        "preservePitch": true,
+        "backend": "soundstretch",
+        "renderedSourceUri": "fixtures/derived/track-stub-b-150-to-140.wav",
+        "requiresRenderedBpmValidation": true
+      },
+      "keyframes": [
+        {
+          "at": 96.0,
+          "value": 0.933333,
+          "interpolation": "hold"
+        }
+      ]
     },
     {
       "type": "automate",
@@ -233,7 +294,7 @@
       "control": "eqLow",
       "keyframes": [
         {
-          "at": 192.0,
+          "at": 222.4,
           "value": 1.0,
           "interpolation": "hold"
         },
@@ -247,22 +308,34 @@
     {
       "type": "automate",
       "deck": 2,
+      "control": "eqHigh",
+      "keyframes": [
+        {
+          "at": 222.4,
+          "value": 1.0,
+          "interpolation": "hold"
+        },
+        {
+          "at": 224.0,
+          "value": 0.62,
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "type": "automate",
+      "deck": 2,
       "control": "reverbWet",
       "postFader": true,
       "effectParameters": {
         "style": "cdj",
-        "reverbDecaySeconds": 4.0
+        "reverbDecaySeconds": 24.0
       },
       "keyframes": [
         {
-          "at": 192.0,
+          "at": 222.4,
           "value": 0.0,
           "interpolation": "hold"
-        },
-        {
-          "at": 220.0,
-          "value": 0.5,
-          "interpolation": "linear"
         },
         {
           "at": 224.0,
@@ -277,14 +350,9 @@
       "control": "volume",
       "keyframes": [
         {
-          "at": 220.0,
-          "value": 1.0,
-          "interpolation": "hold"
-        },
-        {
           "at": 224.0,
           "value": 0.0,
-          "interpolation": "linear"
+          "interpolation": "hold"
         }
       ]
     },
@@ -295,29 +363,24 @@
       "postFader": true,
       "effectParameters": {
         "style": "cdj",
-        "reverbDecaySeconds": 4.0
+        "reverbDecaySeconds": 24.0
       },
       "keyframes": [
         {
-          "at": 220.0,
-          "value": 0.0,
+          "at": 224.0,
+          "value": 1.0,
           "interpolation": "hold"
         },
         {
-          "at": 224.0,
-          "value": 1.0,
-          "interpolation": "linear"
-        },
-        {
-          "at": 240.0,
+          "at": 248.0,
           "value": 0.0,
-          "interpolation": "smoothstep"
+          "interpolation": "hold"
         }
       ]
     },
     {
       "type": "load",
-      "at": 220.0,
+      "at": 224.0,
       "deck": 1,
       "trackId": "track-stub-c",
       "stem": "full",
@@ -329,25 +392,8 @@
       "deck": 1
     },
     {
-      "type": "automate",
-      "deck": 1,
-      "control": "eqLow",
-      "keyframes": [
-        {
-          "at": 224.0,
-          "value": 0.0,
-          "interpolation": "hold"
-        },
-        {
-          "at": 240.0,
-          "value": 1.0,
-          "interpolation": "smoothstep"
-        }
-      ]
-    },
-    {
       "type": "stop",
-      "at": 240.0,
+      "at": 248.0,
       "deck": 2
     }
   ],
@@ -359,8 +405,8 @@
     },
     {
       "at": 224.0,
-      "transitionId": "transition-drop-end-reverb-exit-stub",
-      "message": "Track B dry output is gone at drop end; only post-fader reverb tail remains while track C starts"
+      "transitionId": "transition-drop-end-wash-out-stub",
+      "message": "Track B dry output is gone at drop end; only the post-fader wash tail remains while track C starts"
     }
   ]
 }

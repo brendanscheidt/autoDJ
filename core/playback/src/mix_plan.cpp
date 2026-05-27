@@ -406,6 +406,20 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     return &value->objectValue;
 }
 
+[[nodiscard]] const std::map<std::string, JsonValue>* optionalObject(const std::map<std::string, JsonValue>& object,
+                                                                     const std::string& field,
+                                                                     PlanValidationResult& result) {
+    const auto* value = findField(object, field);
+    if (value == nullptr) {
+        return nullptr;
+    }
+    if (value->type != JsonValue::Type::Object) {
+        addError(result, "invalid_object", "Expected object field: " + field);
+        return nullptr;
+    }
+    return &value->objectValue;
+}
+
 [[nodiscard]] const std::vector<JsonValue>* requiredArray(const std::map<std::string, JsonValue>& object,
                                                           const std::string& field,
                                                           PlanValidationResult& result) {
@@ -529,6 +543,20 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     return value->booleanValue;
 }
 
+[[nodiscard]] std::optional<bool> optionalBooleanValue(const std::map<std::string, JsonValue>& object,
+                                                       const std::string& field,
+                                                       PlanValidationResult& result) {
+    const auto* value = findField(object, field);
+    if (value == nullptr) {
+        return std::nullopt;
+    }
+    if (value->type != JsonValue::Type::Boolean) {
+        addError(result, "invalid_boolean", "Expected boolean field: " + field);
+        return std::nullopt;
+    }
+    return value->booleanValue;
+}
+
 [[nodiscard]] std::vector<std::string> optionalStringArray(const std::map<std::string, JsonValue>& object,
                                                            const std::string& field,
                                                            PlanValidationResult& result) {
@@ -556,6 +584,9 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     }
     if (value == "drop_end_reverb_exit") {
         return TransitionTechnique::DropEndReverbExit;
+    }
+    if (value == "wash_out") {
+        return TransitionTechnique::WashOut;
     }
     if (value == "drop_double") {
         return TransitionTechnique::DropDouble;
@@ -670,6 +701,33 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     return {};
 }
 
+[[nodiscard]] std::optional<TempoPlan> parseTempoPlan(const std::map<std::string, JsonValue>& object,
+                                                       const std::string& field,
+                                                       PlanValidationResult& result) {
+    const auto* tempoObject = optionalObject(object, field, result);
+    if (tempoObject == nullptr) {
+        return std::nullopt;
+    }
+
+    TempoPlan tempoPlan;
+    tempoPlan.sourceBpm = optionalNumber(*tempoObject, "sourceBpm", result);
+    tempoPlan.targetBpm = optionalNumber(*tempoObject, "targetBpm", result);
+    tempoPlan.tempoRatio = optionalNumber(*tempoObject, "tempoRatio", result);
+    tempoPlan.preservePitch = optionalBooleanValue(*tempoObject, "preservePitch", result);
+    tempoPlan.backend = optionalString(*tempoObject, "backend", result);
+    tempoPlan.backendVersion = optionalString(*tempoObject, "backendVersion", result);
+    tempoPlan.quality = optionalString(*tempoObject, "quality", result);
+    tempoPlan.renderedSourceUri = optionalString(*tempoObject, "renderedSourceUri", result);
+    tempoPlan.renderedContentHash = optionalString(*tempoObject, "renderedContentHash", result);
+    tempoPlan.targetBpmBias = optionalNumber(*tempoObject, "targetBpmBias", result, true);
+    tempoPlan.validatedBpm = optionalNumber(*tempoObject, "validatedBpm", result);
+    tempoPlan.validationStatus = optionalString(*tempoObject, "validationStatus", result);
+    tempoPlan.requiresRenderedBpmValidation =
+        optionalBooleanValue(*tempoObject, "requiresRenderedBpmValidation", result);
+    tempoPlan.warnings = optionalStringArray(*tempoObject, "warnings", result);
+    return tempoPlan;
+}
+
 [[nodiscard]] TrackAssetReference parseAsset(const JsonValue& value, PlanValidationResult& result) {
     TrackAssetReference asset;
     if (value.type != JsonValue::Type::Object) {
@@ -686,6 +744,8 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     asset.formatHint = optionalString(object, "formatHint", result);
     asset.contentHash = optionalString(object, "contentHash", result);
     asset.durationSeconds = optionalNumber(object, "durationSeconds", result);
+    asset.sourceBpm = optionalNumber(object, "sourceBpm", result);
+    asset.normalizedBpm = optionalNumber(object, "normalizedBpm", result);
     return asset;
 }
 
@@ -714,6 +774,7 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     }
     placement.timelineEndSeconds = optionalNumber(object, "timelineEndSeconds", result);
     placement.role = optionalString(object, "role", result);
+    placement.tempoPlan = parseTempoPlan(object, "tempoPlan", result);
     return placement;
 }
 
@@ -773,6 +834,7 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     transition.measureCountToTarget = optionalNumber(object, "measureCountToTarget", result);
     transition.alignedDropTimelineSeconds = optionalNumber(object, "alignedDropTimelineSeconds", result);
     transition.handoffTimelineSeconds = optionalNumber(object, "handoffTimelineSeconds", result);
+    transition.tempoPlan = parseTempoPlan(object, "tempoPlan", result);
 
     const auto* anchors = findField(object, "sourceAnchors");
     if (anchors != nullptr) {
@@ -955,6 +1017,53 @@ void requireUnique(const std::vector<T>& values,
     }
 }
 
+void validatePositiveBpm(const std::optional<double> value,
+                         const std::string& code,
+                         const std::string& label,
+                         PlanValidationResult& result) {
+    if (value.has_value() && value.value() <= 0.0) {
+        addError(result, code, label + " must be greater than 0");
+    }
+}
+
+void validateTempoPlan(const std::optional<TempoPlan>& tempoPlan,
+                       const std::string& ownerLabel,
+                       PlanValidationResult& result) {
+    if (!tempoPlan.has_value()) {
+        return;
+    }
+
+    const auto& tempo = tempoPlan.value();
+    validatePositiveBpm(tempo.sourceBpm, "invalid_tempo_plan", ownerLabel + " sourceBpm", result);
+    validatePositiveBpm(tempo.targetBpm, "invalid_tempo_plan", ownerLabel + " targetBpm", result);
+    validatePositiveBpm(tempo.validatedBpm, "invalid_tempo_plan", ownerLabel + " validatedBpm", result);
+
+    if (tempo.tempoRatio.has_value() && tempo.tempoRatio.value() <= 0.0) {
+        addError(result, "invalid_tempo_plan", ownerLabel + " tempoRatio must be greater than 0");
+    }
+
+    if (tempo.sourceBpm.has_value() && tempo.targetBpm.has_value() && tempo.tempoRatio.has_value()) {
+        const auto expectedRatio = tempo.targetBpm.value() / tempo.sourceBpm.value();
+        if (std::fabs(expectedRatio - tempo.tempoRatio.value()) > 0.001) {
+            addWarning(result, "tempo_ratio_mismatch",
+                       ownerLabel + " tempoRatio does not match targetBpm/sourceBpm");
+        }
+    }
+
+    const auto changesTempo = tempo.sourceBpm.has_value() && tempo.targetBpm.has_value()
+                           && std::fabs(tempo.sourceBpm.value() - tempo.targetBpm.value()) > 0.001;
+    if (changesTempo && tempo.preservePitch.has_value() && tempo.preservePitch.value() && tempo.backend.empty()) {
+        addWarning(result, "missing_tempo_backend",
+                   ownerLabel + " preserve-pitch tempo change should identify a stretch backend");
+    }
+
+    if (tempo.renderedSourceUri.empty() && tempo.requiresRenderedBpmValidation.has_value()
+        && tempo.requiresRenderedBpmValidation.value()) {
+        addWarning(result, "tempo_render_validation_pending",
+                   ownerLabel + " requests rendered BPM validation but has no renderedSourceUri yet");
+    }
+}
+
 void validatePlan(MixPlan& plan, PlanValidationResult& result) {
     if (plan.schemaVersion != "1.0.0") {
         addError(result, "unsupported_schema_version", "MixPlan schemaVersion must be 1.0.0");
@@ -981,6 +1090,8 @@ void validatePlan(MixPlan& plan, PlanValidationResult& result) {
 
     std::set<std::string> knownTrackIds;
     for (const auto& asset : plan.assets) {
+        validatePositiveBpm(asset.sourceBpm, "invalid_asset_bpm", "Asset sourceBpm", result);
+        validatePositiveBpm(asset.normalizedBpm, "invalid_asset_bpm", "Asset normalizedBpm", result);
         if (!asset.trackId.empty()) {
             knownTrackIds.insert(asset.trackId.value);
         }
@@ -1003,6 +1114,7 @@ void validatePlan(MixPlan& plan, PlanValidationResult& result) {
         if (!placement.placementId.empty()) {
             placementIds.insert(placement.placementId);
         }
+        validateTempoPlan(placement.tempoPlan, "Placement " + placement.placementId, result);
     }
 
     for (const auto& transition : plan.transitions) {
@@ -1022,6 +1134,7 @@ void validatePlan(MixPlan& plan, PlanValidationResult& result) {
             addError(result, "invalid_transition_score", "Transition score must be between 0 and 1: "
                                                        + transition.transitionId);
         }
+        validateTempoPlan(transition.tempoPlan, "Transition " + transition.transitionId, result);
 
         if (transition.templateId == "second_build_drop_switch_v1") {
             if (!transition.measureCountToTarget.has_value() || transition.measureCountToTarget.value() <= 0.0) {
@@ -1042,18 +1155,20 @@ void validatePlan(MixPlan& plan, PlanValidationResult& result) {
         }
 
         if (transition.technique == TransitionTechnique::DropEndReverbExit
-            || transition.templateId == "drop_end_reverb_exit_v1") {
+            || transition.technique == TransitionTechnique::WashOut
+            || transition.templateId == "drop_end_reverb_exit_v1"
+            || transition.templateId == "drop_end_wash_out_v1") {
             if (!transition.measureCountToTarget.has_value() || transition.measureCountToTarget.value() <= 0.0) {
                 addError(result, "missing_measure_count",
-                         "Drop-end reverb exit requires positive measureCountToTarget");
+                         "Drop-end wash-out requires positive measureCountToTarget");
             }
             if (!transition.handoffTimelineSeconds.has_value()) {
-                addError(result, "missing_handoff", "Drop-end reverb exit requires handoffTimelineSeconds");
+                addError(result, "missing_handoff", "Drop-end wash-out requires handoffTimelineSeconds");
             }
             if (transition.handoffTimelineSeconds.has_value()
                 && (transition.handoffTimelineSeconds.value() < transition.timelineStartSeconds
                     || transition.handoffTimelineSeconds.value() > transition.timelineEndSeconds)) {
-                addError(result, "invalid_handoff", "Drop-end reverb exit handoff must be inside transition range");
+                addError(result, "invalid_handoff", "Drop-end wash-out handoff must be inside transition range");
             }
         }
 
@@ -1191,6 +1306,8 @@ std::string toString(const TransitionTechnique technique) {
             return "build_to_drop_swap";
         case TransitionTechnique::DropEndReverbExit:
             return "drop_end_reverb_exit";
+        case TransitionTechnique::WashOut:
+            return "wash_out";
         case TransitionTechnique::DropDouble:
             return "drop_double";
         case TransitionTechnique::LoopTighten:

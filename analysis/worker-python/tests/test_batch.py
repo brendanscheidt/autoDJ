@@ -18,6 +18,8 @@ from autodj_analysis import (
     CurrentSignalBackend,
     DecodedAudio,
     EnergyFeatures,
+    KeyCandidate,
+    KeyCandidateResult,
     RepositoryTrack,
     SectionCandidate,
     SectionCandidateResult,
@@ -307,6 +309,32 @@ def _selected_section_result() -> SectionCandidateResult:
     )
 
 
+def _selected_key_result() -> KeyCandidateResult:
+    return KeyCandidateResult(
+        status="ok",
+        provenance=CandidateProvenance(
+            backend_name="selected-madmom-keyfinder",
+            backend_version="0.1.0",
+            model_name="Selected Madmom/KeyFinder Ensemble",
+            model_version="confidence-gate-v1",
+            parameters={
+                "selectedBackend": "keyfinder",
+                "madmomConfidenceThreshold": 0.3,
+            },
+            processing_seconds=1.5,
+            warnings=("Selected keyfinder because madmom confidence was below the production gate.",),
+        ),
+        tonic="E",
+        mode="minor",
+        camelot="9A",
+        confidence=0.65,
+        candidates=(
+            KeyCandidate(tonic="E", mode="minor", camelot="9A", confidence=0.65, backend="keyfinder"),
+            KeyCandidate(tonic="F#", mode="minor", camelot="11A", confidence=0.24, backend="madmom-cnn-key"),
+        ),
+    )
+
+
 def _write_manifest(tmp_path: Path, tracks: list[dict]) -> Path:
     music_root = tmp_path / "music"
     music_root.mkdir(exist_ok=True)
@@ -474,6 +502,35 @@ def test_build_analyzed_track_artifact_prefers_selected_section_backend_result()
         }
     ]
     assert any("Experimental dubstep phrase inference" in warning for warning in artifact["quality"]["warnings"])
+
+
+def test_build_analyzed_track_artifact_populates_selected_key_result() -> None:
+    signal = _signal_result(
+        "track-drop-001",
+        "sha256:source-a",
+        "sha256:params",
+        "2026-05-16T00:00:00Z",
+        waveform_peak=0.8,
+    )
+    artifact = build_analyzed_track_artifact(
+        _track(),
+        _probe(),
+        created_at_utc="2026-05-16T00:00:00Z",
+        energy_features=signal.energy_features,
+        tempo_features=signal.tempo_features,
+        structure_features=signal.structure_features,
+        key_result=_selected_key_result(),
+    )
+
+    assert artifact["key"]["tonic"] == "E"
+    assert artifact["key"]["mode"] == "minor"
+    assert artifact["key"]["camelot"] == "9A"
+    assert artifact["key"]["confidence"] == 0.65
+    assert artifact["key"]["status"] == "ok"
+    assert artifact["key"]["provenance"]["backendName"] == "selected-madmom-keyfinder"
+    assert artifact["key"]["provenance"]["parameters"]["selectedBackend"] == "keyfinder"
+    assert [candidate["camelot"] for candidate in artifact["key"]["candidates"]] == ["9A", "11A"]
+    assert any("Selected keyfinder" in warning for warning in artifact["quality"]["warnings"])
 
 
 def test_selected_section_backend_falls_back_to_current_signal_sections_when_unusable() -> None:

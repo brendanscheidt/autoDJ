@@ -119,6 +119,27 @@ Outputs:
 Key confidence should influence transition type. Avoid long melodic/vocal blends
 when key confidence is low.
 
+Current POC approach:
+
+- Use Rekordbox XML `TRACK Tonality` as benchmark truth for key detector
+  evaluation, not as production `AnalyzedTrack.key` output.
+- Use `selected-madmom-keyfinder` for production key output: pick
+  `madmom-cnn-key` when its top-class confidence is at least `0.30`, otherwise
+  fall back to `keyfinder`.
+- This selected ensemble reached 46/48 exact Camelot keys on the manually
+  adjudicated 48-track dubstep benchmark. Remaining known misses are `They Shot
+  To Kill` and `Lights Go Down`.
+- Normalize selected detector output into `AnalyzedTrack.key.camelot`, tonic,
+  mode, confidence, candidates, and provenance.
+- C++ planning reads selected key metadata into `TrackAnalysisSummary.key` and
+  classifies pair compatibility as perfect, relative, adjacent, clash, or
+  unknown.
+- Use Camelot compatibility as a planning gate for long harmonic overlaps:
+  second-build drop switches reject confident distant clashes and generated
+  audition batches require same-BPM plus compatible Camelot pairs by default.
+  Reverb exits warn on clashes but do not block, and low-confidence/missing keys
+  remain an unknown-risk state rather than a hard transition rejection.
+
 ### Section Detection
 
 Outputs:

@@ -11,12 +11,17 @@ from . import __version__
 from .audio_io import AudioLoadError, DecodedAudio
 from .backends.base import (
     AnalysisContext,
+    BackendExecutionError,
+    CandidateProvenance,
     FeatureBundle,
+    KeyCandidateResult,
+    KeyDetectorBackend,
     SectionBackend,
     SectionCandidateResult,
 )
 from .backends.current_signal import CURRENT_SIGNAL_BACKEND
 from .backends.dubstep_phrase_hybrid import DUBSTEP_PHRASE_HYBRID_BACKEND, DubstepPhraseHybridBackend
+from .backends.selected_key import SELECTED_KEY_BACKEND, SelectedKeyBackend
 from .cache import (
     ArtifactIdentity,
     CacheError,
@@ -28,6 +33,7 @@ from .cache import (
     waveform_path,
     write_json_atomic,
 )
+from .canonical_audio import canonical_audio_paths
 from .features import EnergyFeatures, FeatureExtractionError, build_energy_analysis
 from .manifest import RepositoryManifest, RepositoryTrack, load_repository_manifest
 from .probe import AudioProbe, ProbeError, ProbeRunner, probe_audio
@@ -44,15 +50,15 @@ from .waveform import WaveformError, write_waveform_artifact
 ANALYZER_PRODUCER = "autodj_analysis.signal"
 ANALYZER_VERSION = __version__
 SELECTED_SECTION_BACKEND = DUBSTEP_PHRASE_HYBRID_BACKEND
-DEFAULT_PARAMETERS_HASH = "sha256:signal-v2-waveform-energy-tempo-dubstep-phrase-hybrid-v1"
+DEFAULT_PARAMETERS_HASH = "sha256:signal-v3-waveform-energy-tempo-key-dubstep-phrase-hybrid-v1"
 FFPROBE_ONLY_WARNING = (
     "Only FFprobe container/stream metadata was analyzed; BPM, key, beat grid, "
     "sections, energy, vocals, stems, and cue points are low-confidence placeholders."
 )
 PARTIAL_SIGNAL_WARNING = (
-    "Signal analysis populated waveform, energy, tempo, beat grid, sections, "
-    "and cue candidates where evidence was available; key, vocals, stems, and "
-    "downbeats remain low-confidence or empty placeholders."
+    "Signal analysis populated waveform, energy, tempo, beat grid, key, sections, "
+    "and cue candidates where evidence was available; vocals, stems, and downbeats "
+    "remain low-confidence or empty placeholders."
 )
 TRACK_STATUS_ANALYZED = "analyzed"
 TRACK_STATUS_SKIPPED = "skipped"
@@ -65,6 +71,7 @@ class SignalAnalysisResult:
     energy_features: EnergyFeatures
     tempo_features: TempoFeatures
     structure_features: StructureFeatures
+    key_result: KeyCandidateResult | None = None
     section_result: SectionCandidateResult | None = None
 
 
@@ -141,6 +148,7 @@ def analyze_repository_manifest(
     signal_analyzer: SignalAnalyzer | None = None,
     section_backend: str = SELECTED_SECTION_BACKEND,
     section_backend_factory: SectionBackendFactory | None = None,
+    canonical_audio_root: str | Path | None = None,
 ) -> BatchAnalysisResult:
     """Load a repository manifest and analyze each track into the cache root."""
 
@@ -155,6 +163,7 @@ def analyze_repository_manifest(
         signal_analyzer=signal_analyzer,
         section_backend=section_backend,
         section_backend_factory=section_backend_factory,
+        canonical_audio_root=canonical_audio_root,
     )
 
 
@@ -169,6 +178,7 @@ def analyze_manifest(
     signal_analyzer: SignalAnalyzer | None = None,
     section_backend: str = SELECTED_SECTION_BACKEND,
     section_backend_factory: SectionBackendFactory | None = None,
+    canonical_audio_root: str | Path | None = None,
 ) -> BatchAnalysisResult:
     """Analyze every track from a parsed repository manifest.
 
@@ -178,17 +188,23 @@ def analyze_manifest(
     """
 
     cache_root_path = Path(cache_root)
+    canonical_audio_root_path = Path(canonical_audio_root) if canonical_audio_root is not None else None
+    effective_parameters_hash = _effective_parameters_hash(
+        parameters_hash,
+        canonical_audio_root=canonical_audio_root_path,
+    )
     tracks = tuple(
         _analyze_manifest_track(
             track,
             cache_root_path,
             ffprobe_path=ffprobe_path,
             force=force,
-            parameters_hash=parameters_hash,
+            parameters_hash=effective_parameters_hash,
             probe_runner=probe_runner,
             signal_analyzer=signal_analyzer,
             section_backend=section_backend,
             section_backend_factory=section_backend_factory,
+            canonical_audio_root=canonical_audio_root_path,
         )
         for track in manifest.tracks
     )
@@ -224,6 +240,12 @@ def artifact_identity_for_track(
     )
 
 
+def _effective_parameters_hash(parameters_hash: str, *, canonical_audio_root: Path | None) -> str:
+    if canonical_audio_root is None:
+        return parameters_hash
+    return f"{parameters_hash}+canonical-pcm-v1"
+
+
 def _analyze_manifest_track(
     track: RepositoryTrack,
     cache_root: Path,
@@ -235,6 +257,7 @@ def _analyze_manifest_track(
     signal_analyzer: SignalAnalyzer | None,
     section_backend: str,
     section_backend_factory: SectionBackendFactory | None,
+    canonical_audio_root: Path | None,
 ) -> BatchTrackResult:
     artifact_path: Path | None = None
     waveform_artifact_path: Path | None = None
@@ -268,10 +291,12 @@ def _analyze_manifest_track(
             track_id=track.track_id,
             runner=probe_runner,
         )
+        analysis_track = _track_for_analysis_audio(track, canonical_audio_root)
+        artifact_track = _track_with_analysis_audio_metadata(track, canonical_audio_root)
         created_at_utc = _utc_now_iso()
         if signal_analyzer is None:
             signal_result = analyze_track_signal(
-                track,
+                analysis_track,
                 identity,
                 created_at_utc,
                 section_backend=section_backend,
@@ -280,9 +305,9 @@ def _analyze_manifest_track(
                 ffprobe_start_time_seconds=probe.start_time_seconds,
             )
         else:
-            signal_result = signal_analyzer(track, identity, created_at_utc)
+            signal_result = signal_analyzer(analysis_track, identity, created_at_utc)
         artifact = build_analyzed_track_artifact(
-            track,
+            artifact_track,
             probe,
             parameters_hash=parameters_hash,
             created_at_utc=created_at_utc,
@@ -291,6 +316,7 @@ def _analyze_manifest_track(
             energy_features=signal_result.energy_features,
             tempo_features=signal_result.tempo_features,
             structure_features=signal_result.structure_features,
+            key_result=signal_result.key_result,
             section_result=signal_result.section_result,
         )
         write_json_atomic(artifact_path, artifact)
@@ -337,12 +363,22 @@ def analyze_track_signal(
     current_backend = CurrentSignalBackend()
     signal_result = current_backend.analyze_signal(track, identity, created_at_utc)
     selected_section_backend = section_backend.strip() or SELECTED_SECTION_BACKEND
+    audio = current_backend.load_track_audio(track)
+    key_context = AnalysisContext(
+        track_id=track.track_id,
+        source_path=track.source_path,
+        analysis_audio_path=track.source_path,
+        duration_seconds=audio.duration_seconds,
+        ffprobe_start_time_seconds=ffprobe_start_time_seconds,
+        source_content_hash=identity.source_content_hash,
+    )
+    key_result = _select_key_result(audio=audio, context=key_context)
     if selected_section_backend == CURRENT_SIGNAL_BACKEND:
         return replace(
             signal_result,
+            key_result=key_result,
             section_result=current_backend.section_result_from_features(signal_result.structure_features),
         )
-    audio = current_backend.load_track_audio(track)
     work_dir = Path(temp_dir) if temp_dir is not None else None
     analysis_audio_path, audio_warnings = _write_section_analysis_audio(audio, work_dir)
     context = AnalysisContext(
@@ -365,7 +401,49 @@ def analyze_track_signal(
         structure_features=signal_result.structure_features,
         extra_warnings=audio_warnings,
     )
-    return replace(signal_result, section_result=section_result)
+    return replace(signal_result, key_result=key_result, section_result=section_result)
+
+
+def _track_for_analysis_audio(track: RepositoryTrack, canonical_audio_root: Path | None) -> RepositoryTrack:
+    if canonical_audio_root is None:
+        return track
+    paths = canonical_audio_paths(canonical_audio_root, track.track_id)
+    if not paths.audio_path.exists():
+        raise AudioLoadError(
+            "canonical_audio_missing",
+            f"Canonical PCM audio does not exist for track '{track.track_id}': {paths.audio_path}",
+            source_uri=track.source_uri,
+            track_id=track.track_id,
+        )
+    return replace(
+        track,
+        source_path=paths.audio_path,
+        provider_metadata=_provider_metadata_with_canonical_audio(track, paths.audio_path, paths.metadata_path),
+    )
+
+
+def _track_with_analysis_audio_metadata(track: RepositoryTrack, canonical_audio_root: Path | None) -> RepositoryTrack:
+    if canonical_audio_root is None:
+        return track
+    paths = canonical_audio_paths(canonical_audio_root, track.track_id)
+    return replace(
+        track,
+        provider_metadata=_provider_metadata_with_canonical_audio(track, paths.audio_path, paths.metadata_path),
+    )
+
+
+def _provider_metadata_with_canonical_audio(
+    track: RepositoryTrack,
+    canonical_path: Path,
+    metadata_path: Path,
+) -> dict[str, Any]:
+    provider_metadata = dict(track.provider_metadata)
+    provider_metadata["autodjAnalysisAudio"] = {
+        "timelinePolicy": "shared-canonical-pcm",
+        "canonicalPath": str(canonical_path),
+        "canonicalMetadataPath": str(metadata_path),
+    }
+    return provider_metadata
 
 
 def build_analyzed_track_artifact(
@@ -379,6 +457,7 @@ def build_analyzed_track_artifact(
     energy_features: EnergyFeatures | None = None,
     tempo_features: TempoFeatures | None = None,
     structure_features: StructureFeatures | None = None,
+    key_result: KeyCandidateResult | None = None,
     section_result: SectionCandidateResult | None = None,
 ) -> dict[str, Any]:
     """Build an AnalyzedTrack artifact from repository identity and probe data."""
@@ -389,6 +468,7 @@ def build_analyzed_track_artifact(
         energy_features is not None
         or tempo_features is not None
         or structure_features is not None
+        or key_result is not None
         or section_result is not None
     )
     warnings = [PARTIAL_SIGNAL_WARNING if has_signal_features else FFPROBE_ONLY_WARNING]
@@ -404,6 +484,10 @@ def build_analyzed_track_artifact(
         warnings.extend(tempo_features.warnings)
     if structure_features is not None and section_result is None:
         warnings.extend(structure_features.warnings)
+    if key_result is not None:
+        warnings.extend(key_result.provenance.warnings)
+        if key_result.status != "ok" and key_result.error is not None:
+            warnings.append(key_result.error.message)
     if section_result is not None:
         warnings.extend(section_result.provenance.warnings)
         if section_result.status != "ok" and section_result.error is not None:
@@ -424,12 +508,7 @@ def build_analyzed_track_artifact(
         "analyzer": analyzer,
         "durationSeconds": duration_seconds,
         "tempo": _tempo_analysis(tempo_features),
-        "key": {
-            "tonic": "unknown",
-            "mode": "unknown",
-            "confidence": 0.0,
-            "candidates": [],
-        },
+        "key": _key_analysis(key_result),
         "beatGrid": _beat_grid(tempo_features),
         "sections": _sections(section_result=section_result, structure_features=structure_features),
         "energy": _energy_analysis(energy_features),
@@ -444,6 +523,7 @@ def build_analyzed_track_artifact(
                 energy_features=energy_features,
                 tempo_features=tempo_features,
                 structure_features=structure_features,
+                key_result=key_result,
                 section_result=section_result,
             ),
             "warnings": warnings,
@@ -519,6 +599,28 @@ def _tempo_analysis(features: TempoFeatures | None) -> dict[str, Any]:
     }
 
 
+def _key_analysis(key_result: KeyCandidateResult | None) -> dict[str, Any]:
+    if key_result is None:
+        return {
+            "tonic": "unknown",
+            "mode": "unknown",
+            "confidence": 0.0,
+            "candidates": [],
+        }
+    payload = key_result.to_dict()
+    if key_result.ok:
+        return payload
+    return {
+        "tonic": "unknown",
+        "mode": "unknown",
+        "confidence": 0.0,
+        "candidates": [],
+        "status": payload["status"],
+        "provenance": payload["provenance"],
+        "error": payload.get("error"),
+    }
+
+
 def _beat_grid(features: TempoFeatures | None) -> dict[str, Any]:
     if features is not None:
         return build_beat_grid(features)
@@ -558,12 +660,14 @@ def _overall_confidence(
     energy_features: EnergyFeatures | None,
     tempo_features: TempoFeatures | None,
     structure_features: StructureFeatures | None,
+    key_result: KeyCandidateResult | None,
     section_result: SectionCandidateResult | None,
 ) -> float:
     if (
         energy_features is None
         and tempo_features is None
         and structure_features is None
+        and key_result is None
         and section_result is None
     ):
         return 0.1
@@ -574,6 +678,10 @@ def _overall_confidence(
     if tempo_features is not None:
         confidence_values.append(tempo_features.confidence)
         confidence_values.append(tempo_features.beat_grid_confidence)
+    if key_result is not None and key_result.status == "ok":
+        confidence_values.append(key_result.confidence)
+    elif key_result is not None:
+        confidence_values.append(0.15)
     if section_result is None and structure_features is not None and structure_features.sections:
         confidence_values.append(max(float(section["confidence"]) for section in structure_features.sections))
     elif section_result is None and structure_features is not None:
@@ -586,6 +694,34 @@ def _overall_confidence(
     if not confidence_values:
         return 0.1
     return round(max(0.1, min(sum(confidence_values) / len(confidence_values), 0.8)), 6)
+
+
+def _select_key_result(
+    *,
+    audio: DecodedAudio,
+    context: AnalysisContext,
+    key_backend_factory: Callable[[], KeyDetectorBackend] | None = None,
+) -> KeyCandidateResult:
+    selected_name = SELECTED_KEY_BACKEND
+    try:
+        backend = key_backend_factory() if key_backend_factory is not None else SelectedKeyBackend()
+        if not isinstance(backend, KeyDetectorBackend):
+            raise TypeError(f"selected key backend '{selected_name}' does not implement KeyDetectorBackend")
+        return backend.analyze_key(audio, context)
+    except Exception as exc:
+        return KeyCandidateResult(
+            status="failed",
+            provenance=CandidateProvenance(
+                backend_name=selected_name,
+                backend_version=__version__,
+            ),
+            error=BackendExecutionError(
+                code="selected_key_failed",
+                message=str(exc) or exc.__class__.__name__,
+                backend_name=selected_name,
+                details={"exceptionType": exc.__class__.__name__},
+            ),
+        )
 
 
 def _select_semantic_section_result(

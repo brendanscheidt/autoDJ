@@ -237,7 +237,13 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
     DropEndReverbExitResult result;
 
     if (options.outgoingDeck < 1 || options.incomingDeck < 1 || options.outgoingDeck == options.incomingDeck) {
-        reject(result, "invalid_deck_options", "Drop-end reverb exit requires two distinct positive deck numbers");
+        reject(result, "invalid_deck_options", "Drop-end wash-out requires two distinct positive deck numbers");
+        return result;
+    }
+    if (options.includeWashSweep
+        && (options.washSweepDeck < 1 || options.washSweepDeck == options.outgoingDeck
+            || options.washSweepDeck == options.incomingDeck)) {
+        reject(result, "invalid_deck_options", "Drop-end wash-out sweep requires a distinct positive deck number");
         return result;
     }
     if (!isFiniteNonNegative(options.outgoingTimelineStartSeconds)
@@ -245,9 +251,14 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
         || options.reverbRampMeasures <= 0.0 || options.finalDryFadeMeasures <= 0.0
         || options.incomingLowRestoreMeasures <= 0.0 || options.midReverbWet < 0.0 || options.midReverbWet > 1.0
         || options.reverbDecaySeconds <= 0.0 || options.reverbTailSeconds <= 0.0
+        || (options.includeWashSweep
+            && (options.washSweepTrackId.empty() || options.washSweepSourceUri.empty()
+                || options.washSweepDurationSeconds <= 0.0 || options.washSweepPeakOffsetSeconds < 0.0
+                || options.washSweepPeakOffsetSeconds > options.washSweepDurationSeconds
+                || options.washSweepGain < 0.0 || options.washSweepGain > 4.0))
         || options.minimumSectionConfidence < 0.0
         || options.minimumSectionConfidence > 1.0) {
-        reject(result, "invalid_template_options", "Drop-end reverb exit options include invalid values");
+        reject(result, "invalid_template_options", "Drop-end wash-out options include invalid values");
         return result;
     }
     if (outgoing.normalizedBpm <= 0.0 || incoming.normalizedBpm <= 0.0 || !std::isfinite(outgoing.normalizedBpm)
@@ -258,7 +269,7 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
     if (!options.allowSecondBuildDropPair && hasUsableSecondBuildDropPair(outgoing, options.minimumSectionConfidence)) {
         reject(result,
                "outgoing_second_build_drop_available",
-               "Drop-end reverb exit is reserved for tracks without a usable second build/drop pair");
+               "Drop-end wash-out is reserved for tracks without a usable second build/drop pair");
         return result;
     }
     if (outgoing.drops.empty()) {
@@ -277,7 +288,7 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
         return result;
     }
     if (drop.confidence.has_value() && drop.confidence.value() < options.minimumSectionConfidence) {
-        reject(result, "low_drop_confidence", "Outgoing drop confidence is below the threshold for reverb exit");
+        reject(result, "low_drop_confidence", "Outgoing drop confidence is below the threshold for wash-out");
         return result;
     }
     if (drop.confidence.has_value() && drop.confidence.value() < 0.85) {
@@ -295,26 +306,25 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
     const double rampStartTimelineSeconds = std::max(dropStartTimelineSeconds, desiredRampStart);
     const double actualRampMeasures = (dropEndTimelineSeconds - rampStartTimelineSeconds) / outgoingMeasureSeconds;
     if (actualRampMeasures + 0.000001 < options.reverbRampMeasures) {
-        addRiskFlag(result, "reverb_exit_ramp_clamped");
+        addRiskFlag(result, "wash_out_ramp_clamped");
     }
-    const double reverbMidpointTimelineSeconds =
-        rampStartTimelineSeconds + (dropEndTimelineSeconds - rampStartTimelineSeconds) / 2.0;
     const double tailEndTimelineSeconds = dropEndTimelineSeconds + options.reverbTailSeconds;
     const double incomingSourceStartSeconds = firstIncomingBeat->timeSeconds;
     const double incomingLoadAt = std::max(0.0, dropEndTimelineSeconds - options.incomingLoadLeadSeconds);
 
     if (!isFiniteNonNegative(dropStartTimelineSeconds) || !isFiniteNonNegative(dropEndTimelineSeconds)
         || !isFiniteNonNegative(rampStartTimelineSeconds) || tailEndTimelineSeconds <= dropEndTimelineSeconds
-        || reverbMidpointTimelineSeconds > dropEndTimelineSeconds) {
-        reject(result, "invalid_reverb_exit_timing", "Calculated reverb-exit timing is not usable");
+        || rampStartTimelineSeconds > dropEndTimelineSeconds) {
+        reject(result, "invalid_wash_out_timing", "Calculated wash-out timing is not usable");
         return result;
     }
 
     const auto outgoingSuffix = trackIdSuffix(outgoing);
     const auto incomingSuffix = trackIdSuffix(incoming);
-    const std::string outgoingPlacementId = "place-" + outgoingSuffix + "-outgoing-reverb-exit";
-    const std::string incomingPlacementId = "place-" + incomingSuffix + "-incoming-reverb-exit";
-    const std::string transitionId = "transition-drop-end-reverb-exit-" + outgoingSuffix + "-to-" + incomingSuffix;
+    const std::string outgoingPlacementId = "place-" + outgoingSuffix + "-outgoing-wash-out";
+    const std::string incomingPlacementId = "place-" + incomingSuffix + "-incoming-wash-out";
+    const std::string sweepPlacementId = "place-washout-sweep-fx";
+    const std::string transitionId = "transition-drop-end-wash-out-" + outgoingSuffix + "-to-" + incomingSuffix;
 
     DropEndReverbExitPlanFragment fragment;
     fragment.placements.push_back(playback::TrackPlacement{
@@ -340,22 +350,52 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
                                   : std::nullopt,
         .role = "incoming",
     });
+    if (options.includeWashSweep) {
+        const double sweepTimelineStartSeconds = dropEndTimelineSeconds - options.washSweepPeakOffsetSeconds;
+        const double sweepSourceStartSeconds = sweepTimelineStartSeconds < 0.0 ? -sweepTimelineStartSeconds : 0.0;
+        const double clampedSweepTimelineStartSeconds = std::max(0.0, sweepTimelineStartSeconds);
+        const double sweepDurationAfterSourceStart = options.washSweepDurationSeconds - sweepSourceStartSeconds;
+        const double sweepTimelineEndSeconds = clampedSweepTimelineStartSeconds + sweepDurationAfterSourceStart;
+        if (sweepDurationAfterSourceStart > 0.0) {
+            fragment.assets.push_back(playback::TrackAssetReference{
+                .trackId = domain::TrackId{options.washSweepTrackId},
+                .sourceUri = options.washSweepSourceUri,
+                .formatHint = options.washSweepFormatHint,
+                .contentHash = {},
+                .durationSeconds = options.washSweepDurationSeconds,
+                .sourceBpm = std::nullopt,
+                .normalizedBpm = std::nullopt,
+            });
+            fragment.placements.push_back(playback::TrackPlacement{
+                .placementId = sweepPlacementId,
+                .trackId = domain::TrackId{options.washSweepTrackId},
+                .deck = options.washSweepDeck,
+                .sourceStartSeconds = sweepSourceStartSeconds,
+                .sourceEndSeconds = options.washSweepDurationSeconds,
+                .timelineStartSeconds = clampedSweepTimelineStartSeconds,
+                .timelineEndSeconds = sweepTimelineEndSeconds,
+                .role = "fx",
+            });
+        }
+    }
 
     fragment.transition = playback::TransitionEdge{
         .transitionId = transitionId,
         .fromPlacementId = outgoingPlacementId,
         .toPlacementId = incomingPlacementId,
-        .technique = playback::TransitionTechnique::DropEndReverbExit,
-        .templateId = "drop_end_reverb_exit_v1",
+        .technique = playback::TransitionTechnique::WashOut,
+        .templateId = "drop_end_wash_out_v1",
         .timelineStartSeconds = rampStartTimelineSeconds,
         .timelineEndSeconds = tailEndTimelineSeconds,
         .score = result.riskFlags.empty() ? 0.78 : 0.68,
         .reasons = {
             "Outgoing track has a usable drop end",
             "Incoming track starts from its first beatgrid beat",
-            "Outgoing mid/high reverb ramps only over the final two measures of the drop",
+            "Outgoing mid/high reverb ramps to fully wet over the final four beats of the drop",
+            "Outgoing low EQ ramps to zero over the final four beats of the drop",
             "Incoming track starts full volume and full-band exactly at the outgoing drop end",
-            "Outgoing dry signal hard-cuts at the drop end while a ten-second post-fader reverb tail remains",
+            "Outgoing dry signal hard-cuts at the drop end while the post-fader wash tail decays naturally",
+            "A dominant sweep FX layer peaks exactly at the wash-out handoff to mask sharp cuts",
         },
         .riskFlags = result.riskFlags,
         .measureCountToTarget = actualRampMeasures,
@@ -372,17 +412,37 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
                                             options.outgoingSourceStartSeconds));
     fragment.commands.push_back(playCommand(options.outgoingTimelineStartSeconds, options.outgoingDeck));
     fragment.commands.push_back(automationCommand(options.outgoingDeck,
+                                                  playback::AutomationControl::EqLow,
+                                                  {
+                                                      keyframe(rampStartTimelineSeconds,
+                                                               1.0,
+                                                               playback::KeyframeInterpolation::Hold),
+                                                      keyframe(dropEndTimelineSeconds,
+                                                               0.0,
+                                                               playback::KeyframeInterpolation::Linear),
+                                                  }));
+    fragment.commands.push_back(automationCommand(options.outgoingDeck,
+                                                  playback::AutomationControl::EqHigh,
+                                                  {
+                                                      keyframe(rampStartTimelineSeconds,
+                                                               1.0,
+                                                               playback::KeyframeInterpolation::Hold),
+                                                      keyframe(dropEndTimelineSeconds,
+                                                               0.62,
+                                                               playback::KeyframeInterpolation::Linear),
+                                                  }));
+    fragment.commands.push_back(automationCommand(options.outgoingDeck,
                                                   playback::AutomationControl::ReverbWet,
                                                   {
                                                       keyframe(rampStartTimelineSeconds,
                                                                0.0,
                                                                playback::KeyframeInterpolation::Hold),
-                                                      keyframe(reverbMidpointTimelineSeconds,
-                                                               options.midReverbWet,
-                                                               playback::KeyframeInterpolation::Linear),
                                                       keyframe(dropEndTimelineSeconds,
                                                                1.0,
                                                                playback::KeyframeInterpolation::Linear),
+                                                      keyframe(dropEndTimelineSeconds,
+                                                               0.0,
+                                                               playback::KeyframeInterpolation::Hold),
                                                   },
                                                   true,
                                                   options.reverbDecaySeconds));
@@ -401,12 +461,33 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
                                                                playback::KeyframeInterpolation::Hold),
                                                       keyframe(tailEndTimelineSeconds,
                                                                0.0,
-                                                               playback::KeyframeInterpolation::Smoothstep),
+                                                               playback::KeyframeInterpolation::Hold),
                                                   },
                                                   true,
                                                   options.reverbDecaySeconds));
     fragment.commands.push_back(loadCommand(incomingLoadAt, options.incomingDeck, incoming, incomingSourceStartSeconds));
     fragment.commands.push_back(playCommand(dropEndTimelineSeconds, options.incomingDeck));
+    if (options.includeWashSweep && !fragment.assets.empty()) {
+        const auto& sweepPlacement = fragment.placements.back();
+        fragment.commands.push_back(playback::DeckCommand{
+            .type = playback::DeckCommandType::Load,
+            .at = sweepPlacement.timelineStartSeconds,
+            .deck = options.washSweepDeck,
+            .trackId = domain::TrackId{options.washSweepTrackId},
+            .stem = "full",
+            .cueSeconds = sweepPlacement.sourceStartSeconds,
+        });
+        fragment.commands.push_back(playCommand(sweepPlacement.timelineStartSeconds, options.washSweepDeck));
+        fragment.commands.push_back(automationCommand(options.washSweepDeck,
+                                                      playback::AutomationControl::Volume,
+                                                      {
+                                                          keyframe(sweepPlacement.timelineStartSeconds,
+                                                                   options.washSweepGain,
+                                                                   playback::KeyframeInterpolation::Hold),
+                                                      }));
+        fragment.commands.push_back(stopCommand(sweepPlacement.timelineEndSeconds.value_or(tailEndTimelineSeconds),
+                                                options.washSweepDeck));
+    }
     fragment.commands.push_back(stopCommand(tailEndTimelineSeconds, options.outgoingDeck));
     sortCommands(fragment.commands);
 
@@ -414,15 +495,23 @@ DropEndReverbExitResult buildDropEndReverbExitTemplate(const TrackAnalysisSummar
         .at = rampStartTimelineSeconds,
         .placementId = outgoingPlacementId,
         .transitionId = transitionId,
-        .message = "Drop-end reverb exit begins with " + measuresMessage(actualRampMeasures)
-                   + " measures of ramp before the outgoing drop end",
+        .message = "Drop-end wash-out begins with " + measuresMessage(actualRampMeasures)
+                   + " measures of low-cut and fully wet reverb ramp before the outgoing drop end",
     });
     fragment.annotations.push_back(playback::PlanAnnotation{
         .at = dropEndTimelineSeconds,
         .placementId = incomingPlacementId,
         .transitionId = transitionId,
-        .message = "Incoming track starts full-band while the outgoing reverb tail decays for ten seconds",
+        .message = "Incoming track starts full-band while the outgoing wash tail decays naturally",
     });
+    if (options.includeWashSweep && !fragment.assets.empty()) {
+        fragment.annotations.push_back(playback::PlanAnnotation{
+            .at = dropEndTimelineSeconds,
+            .placementId = sweepPlacementId,
+            .transitionId = transitionId,
+            .message = "Wash-out sweep FX peak is aligned to the outgoing cut and incoming first beat",
+        });
+    }
 
     result.fragment = std::move(fragment);
     return result;

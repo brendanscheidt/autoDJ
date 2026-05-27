@@ -319,26 +319,47 @@ void parse_mix_plan_reads_contract_fixture_poc_fields() {
 
     const auto& plan = parsed.plan.value();
     assert(plan.assets.size() == 3);
+    assert(plan.assets[0].sourceBpm == 140.0);
+    assert(plan.assets[1].sourceBpm == 150.0);
     assert(plan.tracks.size() == 3);
+    assert(plan.tracks[1].tempoPlan.has_value());
+    assert(plan.tracks[1].tempoPlan->sourceBpm == 150.0);
+    assert(plan.tracks[1].tempoPlan->targetBpm == 140.0);
+    assert(plan.tracks[1].tempoPlan->preservePitch == true);
+    assert(plan.tracks[1].tempoPlan->backend == "soundstretch");
+    assert(plan.tracks[1].tempoPlan->requiresRenderedBpmValidation == true);
     assert(plan.transitions.size() == 2);
     assert(plan.transitions[0].technique == autodj::playback::TransitionTechnique::BuildToDropSwap);
     assert(plan.transitions[0].templateId == "second_build_drop_switch_v1");
     assert(plan.transitions[0].measureCountToTarget == 8.0);
-    assert(plan.transitions[1].technique == autodj::playback::TransitionTechnique::DropEndReverbExit);
-    assert(plan.transitions[1].templateId == "drop_end_reverb_exit_v1");
+    assert(plan.transitions[0].tempoPlan.has_value());
+    assert(plan.transitions[0].tempoPlan->tempoRatio.has_value());
+    assert(nearly_equal(plan.transitions[0].tempoPlan->tempoRatio.value(), 0.933333));
+    assert(plan.transitions[1].technique == autodj::playback::TransitionTechnique::WashOut);
+    assert(plan.transitions[1].templateId == "drop_end_wash_out_v1");
     assert(plan.transitions[1].sourceAnchors.contains("toFirstBeat"));
 
     bool foundReverbTailCommand = false;
+    bool foundTempoCommand = false;
     for (const auto& command : plan.commands) {
         if (command.type == autodj::playback::DeckCommandType::Automate && command.control.has_value()
             && command.control.value() == autodj::playback::AutomationControl::ReverbTailGain) {
             foundReverbTailCommand = true;
             assert(command.postFader);
             assert(command.effectParameters.contains("reverbDecaySeconds"));
-            assert(command.keyframes.size() == 3);
+            assert(command.keyframes.size() == 2);
+        }
+        if (command.type == autodj::playback::DeckCommandType::Automate && command.control.has_value()
+            && command.control.value() == autodj::playback::AutomationControl::Tempo) {
+            foundTempoCommand = true;
+            assert(command.effectParameters.contains("preservePitch"));
+            assert(command.effectParameters.contains("requiresRenderedBpmValidation"));
+            assert(command.keyframes.size() == 1);
+            assert(nearly_equal(command.keyframes.front().value, 0.933333));
         }
     }
     assert(foundReverbTailCommand);
+    assert(foundTempoCommand);
 }
 
 void parse_mix_plan_rejects_malformed_json() {
@@ -440,6 +461,59 @@ void parse_mix_plan_rejects_invalid_template_invariants() {
     assert(!parsed.validation.ok);
     assert(contains_error_code(parsed.validation, "missing_measure_count"));
     assert(contains_error_code(parsed.validation, "invalid_handoff"));
+}
+
+void parse_mix_plan_rejects_invalid_tempo_plan_numbers() {
+    const auto parsed = autodj::playback::parseMixPlan(R"json({
+  "schemaVersion": "1.0.0",
+  "planId": "plan-bad-tempo",
+  "createdAtUtc": "2026-01-01T00:00:00Z",
+  "strategy": {
+    "strategyId": "test-strategy",
+    "strategyVersion": "1.0.0"
+  },
+  "tracks": [
+    {
+      "placementId": "place-a",
+      "trackId": "track-a",
+      "deck": 1,
+      "sourceStartSeconds": 0.0,
+      "timelineStartSeconds": 0.0,
+      "tempoPlan": {
+        "sourceBpm": 140.0,
+        "targetBpm": 0.0,
+        "tempoRatio": 0.0,
+        "preservePitch": true
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "transitionId": "transition-test",
+      "fromPlacementId": "place-a",
+      "toPlacementId": "place-a",
+      "technique": "hard_cut",
+      "timelineStartSeconds": 0.0,
+      "timelineEndSeconds": 0.0,
+      "score": 0.5,
+      "reasons": [
+        "test transition"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "type": "load",
+      "at": 0.0,
+      "deck": 1,
+      "trackId": "track-a",
+      "cueSeconds": 0.0
+    }
+  ]
+})json");
+
+    assert(!parsed.validation.ok);
+    assert(contains_error_code(parsed.validation, "invalid_tempo_plan"));
 }
 
 void execution_state_advances_loaded_playing_deck_source_time() {
@@ -588,6 +662,7 @@ int main() {
     parse_mix_plan_rejects_unknown_transition_placement();
     parse_mix_plan_rejects_unsorted_commands();
     parse_mix_plan_rejects_invalid_template_invariants();
+    parse_mix_plan_rejects_invalid_tempo_plan_numbers();
     execution_state_advances_loaded_playing_deck_source_time();
     execution_state_recomputes_after_seek_without_incremental_guessing();
     execution_state_interpolates_deck_and_global_automation();

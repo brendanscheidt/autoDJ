@@ -62,6 +62,35 @@ namespace {
     };
 }
 
+[[nodiscard]] std::vector<autodj::dj::AnalyzedBeat> make_beats(const double bpm, const int count) {
+    std::vector<autodj::dj::AnalyzedBeat> beats;
+    beats.reserve(static_cast<std::size_t>(count));
+    const double beatSeconds = 60.0 / bpm;
+    for (int index = 0; index < count; ++index) {
+        beats.push_back(autodj::dj::AnalyzedBeat{
+            .index = index,
+            .timeSeconds = static_cast<double>(index) * beatSeconds,
+            .beatInBar = index % autodj::dj::TrackAnalysisSummary::beatsPerMeasure + 1,
+            .confidence = 1.0,
+        });
+    }
+    return beats;
+}
+
+void set_key(autodj::dj::TrackAnalysisSummary& summary,
+             std::string camelot,
+             const double confidence = 0.9,
+             std::string backendName = "selected-madmom-keyfinder") {
+    summary.key = autodj::dj::AnalyzedKey{
+        .tonic = "E",
+        .mode = "minor",
+        .camelot = std::move(camelot),
+        .confidence = confidence,
+        .backendName = std::move(backendName),
+        .modelName = "Selected Madmom/KeyFinder Ensemble",
+    };
+}
+
 [[nodiscard]] autodj::dj::TrackAnalysisSummary make_outgoing_drop_switch_track(const double bpm = 150.0) {
     autodj::dj::TrackAnalysisSummary summary;
     summary.trackId = autodj::domain::TrackId{"track-a"};
@@ -72,11 +101,8 @@ namespace {
     summary.tempoConfidence = 0.95;
     summary.beatGridConfidence = 0.96;
     summary.overallConfidence = 0.9;
-    summary.beats = {
-        {.index = 0, .timeSeconds = 0.0, .beatInBar = 1, .confidence = 1.0},
-        {.index = 160, .timeSeconds = 64.0, .beatInBar = 1, .confidence = 1.0},
-        {.index = 240, .timeSeconds = 96.0, .beatInBar = 1, .confidence = 1.0},
-    };
+    set_key(summary, "9A");
+    summary.beats = make_beats(bpm, 401);
     summary.builds = {
         make_section("a-build-1", "build", 0.0, 32.0, 0),
         make_section("a-build-2", "build", 64.0, 96.0, 160),
@@ -98,11 +124,8 @@ namespace {
     summary.tempoConfidence = 0.94;
     summary.beatGridConfidence = 0.95;
     summary.overallConfidence = 0.89;
-    summary.beats = {
-        {.index = 0, .timeSeconds = 0.0, .beatInBar = 1, .confidence = 1.0},
-        {.index = 120, .timeSeconds = 48.0, .beatInBar = 1, .confidence = 1.0},
-        {.index = 200, .timeSeconds = 80.0, .beatInBar = 1, .confidence = 1.0},
-    };
+    set_key(summary, "9A");
+    summary.beats = make_beats(bpm, 451);
     summary.builds = {
         make_section("b-build-1", "build", 48.0, 80.0, 120),
     };
@@ -122,6 +145,7 @@ namespace {
     summary.tempoConfidence = 0.95;
     summary.beatGridConfidence = 0.96;
     summary.overallConfidence = 0.9;
+    set_key(summary, "9A");
     summary.beats = {
         {.index = 0, .timeSeconds = 0.0, .beatInBar = 1, .confidence = 1.0},
         {.index = 80, .timeSeconds = 32.0, .beatInBar = 1, .confidence = 1.0},
@@ -147,6 +171,7 @@ namespace {
     summary.tempoConfidence = 0.94;
     summary.beatGridConfidence = 0.95;
     summary.overallConfidence = 0.89;
+    set_key(summary, "9A");
     summary.beats = {
         {.index = 0, .timeSeconds = 0.4, .beatInBar = 1, .confidence = 1.0},
         {.index = 4, .timeSeconds = 2.0, .beatInBar = 1, .confidence = 1.0},
@@ -235,6 +260,10 @@ void analysis_summary_reads_contract_fixture() {
     assert(summary.rawBpm.has_value());
     assert(nearly_equal(summary.rawBpm.value(), 140.0));
     assert(nearly_equal(summary.tempoConfidence, 1.0));
+    assert(summary.key.camelot == "4A");
+    assert(summary.key.tonic == "F");
+    assert(summary.key.mode == "minor");
+    assert(nearly_equal(summary.key.confidence, 0.8));
     assert(nearly_equal(summary.beatGridConfidence, 1.0));
     assert(nearly_equal(summary.overallConfidence, 0.86));
     assert(autodj::dj::TrackAnalysisSummary::beatsPerMeasure == 4);
@@ -244,6 +273,82 @@ void analysis_summary_reads_contract_fixture() {
     assert(summary.cuePoints.size() == 3);
     assert(summary.qualityWarnings.size() == 1);
     assert(summary.riskFlags.empty());
+}
+
+void analysis_summary_reads_key_metadata_and_risk_flags() {
+    const std::string knownKeyJson = R"json({
+      "schemaVersion": "1.0.0",
+      "trackId": "key-fixture",
+      "source": { "sourceUri": "fixture://key-fixture" },
+      "tempo": { "bpm": 150.0, "normalizedBpm": 150.0, "confidence": 0.92 },
+      "key": {
+        "tonic": "E",
+        "mode": "minor",
+        "camelot": "9A",
+        "confidence": 0.91,
+        "provenance": {
+          "backendName": "selected-madmom-keyfinder",
+          "modelName": "Selected Madmom/KeyFinder Ensemble"
+        },
+        "candidates": []
+      },
+      "beatGrid": {
+        "confidence": 0.91,
+        "beats": [{ "index": 0, "timeSeconds": 0.0, "beatInBar": 1 }]
+      },
+      "sections": [],
+      "cuePoints": [],
+      "quality": { "overallConfidence": 0.89, "warnings": [] }
+    })json";
+
+    const auto known = autodj::dj::parseTrackAnalysisSummary(knownKeyJson);
+
+    assert(known.ok());
+    assert(known.summary->key.camelot == "9A");
+    assert(known.summary->key.backendName == "selected-madmom-keyfinder");
+    assert(!contains(known.summary->riskFlags, "missing_key"));
+    assert(!contains(known.summary->riskFlags, "low_key_confidence"));
+
+    const std::string lowConfidenceJson = R"json({
+      "schemaVersion": "1.0.0",
+      "trackId": "low-key-fixture",
+      "source": { "sourceUri": "fixture://low-key-fixture" },
+      "tempo": { "bpm": 150.0, "normalizedBpm": 150.0, "confidence": 0.92 },
+      "key": { "tonic": "E", "mode": "minor", "camelot": "9A", "confidence": 0.4, "candidates": [] },
+      "beatGrid": {
+        "confidence": 0.91,
+        "beats": [{ "index": 0, "timeSeconds": 0.0, "beatInBar": 1 }]
+      },
+      "sections": [],
+      "cuePoints": [],
+      "quality": { "overallConfidence": 0.89, "warnings": [] }
+    })json";
+
+    const auto lowConfidence = autodj::dj::parseTrackAnalysisSummary(lowConfidenceJson);
+
+    assert(lowConfidence.ok());
+    assert(contains(lowConfidence.summary->riskFlags, "low_key_confidence"));
+
+    const std::string missingKeyJson = R"json({
+      "schemaVersion": "1.0.0",
+      "trackId": "missing-key-fixture",
+      "source": { "sourceUri": "fixture://missing-key-fixture" },
+      "tempo": { "bpm": 150.0, "normalizedBpm": 150.0, "confidence": 0.92 },
+      "beatGrid": {
+        "confidence": 0.91,
+        "beats": [{ "index": 0, "timeSeconds": 0.0, "beatInBar": 1 }]
+      },
+      "sections": [],
+      "cuePoints": [],
+      "quality": { "overallConfidence": 0.89, "warnings": [] }
+    })json";
+
+    const auto missing = autodj::dj::parseTrackAnalysisSummary(missingKeyJson);
+
+    assert(missing.ok());
+    assert(contains(missing.summary->riskFlags, "missing_key"));
+    assert(!missing.warnings.empty());
+    assert(missing.warnings.front().code == "missing_key_analysis");
 }
 
 void analysis_summary_orders_sections_and_cues() {
@@ -409,7 +514,7 @@ void drop_switch_template_generates_aligned_plan_fragment() {
     assert(fragment.annotations.size() == 4);
 }
 
-void drop_switch_template_clamps_incoming_source_start() {
+void drop_switch_template_rejects_when_incoming_lacks_enough_predrop_beats() {
     auto outgoing = make_outgoing_drop_switch_track();
     outgoing.builds[1] = make_section("a-build-2", "build", 64.0, 128.0, 160);
     outgoing.drops[1] = make_section("a-drop-2", "drop", 128.0, 160.0, 320);
@@ -420,11 +525,8 @@ void drop_switch_template_clamps_incoming_source_start() {
 
     const auto result = autodj::dj::buildSecondBuildDropSwitchTemplate(outgoing, incoming);
 
-    assert(result.ok());
-    assert(contains(result.fragment->transition.riskFlags, "incoming_source_start_clamped"));
-    assert(nearly_equal(result.fragment->transition.measureCountToTarget.value(), 40.0));
-    assert(nearly_equal(result.fragment->placements[1].sourceStartSeconds, 0.0));
-    assert(nearly_equal(result.fragment->placements[1].timelineStartSeconds, 96.0));
+    assert(!result.ok());
+    assert(contains_issue(result.rejectionReasons, "missing_incoming_predrop_beat"));
 }
 
 void drop_switch_template_rejects_missing_sections() {
@@ -437,11 +539,11 @@ void drop_switch_template_rejects_missing_sections() {
     assert(contains_issue(outgoingResult.rejectionReasons, "missing_outgoing_second_build_drop"));
 
     auto incoming = make_incoming_drop_switch_track();
-    incoming.builds.clear();
+    incoming.drops.clear();
     const auto incomingResult =
         autodj::dj::buildSecondBuildDropSwitchTemplate(make_outgoing_drop_switch_track(), incoming);
     assert(!incomingResult.ok());
-    assert(contains_issue(incomingResult.rejectionReasons, "missing_incoming_first_build_drop"));
+    assert(contains_issue(incomingResult.rejectionReasons, "missing_incoming_first_drop"));
 }
 
 void drop_switch_template_rejects_low_confidence_sections() {
@@ -482,21 +584,38 @@ void drop_end_reverb_exit_generates_full_ramp_fragment() {
     assert(result.fragment.has_value());
     const auto& fragment = result.fragment.value();
 
-    assert(fragment.placements.size() == 2);
+    constexpr double sweepDurationSeconds = 7.68;
+    constexpr double sweepPeakOffsetSeconds = 3.8400907029478457;
+    constexpr double sweepTimelineStartSeconds = 64.0 - sweepPeakOffsetSeconds;
+    constexpr double sweepTimelineEndSeconds = sweepTimelineStartSeconds + sweepDurationSeconds;
+
+    assert(fragment.assets.size() == 1);
+    assert(fragment.assets[0].trackId.value == "washout-sweep-fx");
+    assert(fragment.assets[0].sourceUri == "generated://autodj/fx/washout-sweep-v1.wav");
+    assert(nearly_equal(fragment.assets[0].durationSeconds.value(), sweepDurationSeconds));
+
+    assert(fragment.placements.size() == 3);
     assert(fragment.placements[0].trackId.value == "track-reverb-a");
     assert(fragment.placements[0].deck == 1);
     assert(nearly_equal(fragment.placements[0].sourceEndSeconds.value(), 64.0));
-    assert(nearly_equal(fragment.placements[0].timelineEndSeconds.value(), 74.0));
+    assert(nearly_equal(fragment.placements[0].timelineEndSeconds.value(), 88.0));
     assert(fragment.placements[1].trackId.value == "track-reverb-b");
     assert(fragment.placements[1].deck == 2);
     assert(nearly_equal(fragment.placements[1].sourceStartSeconds, 0.4));
     assert(nearly_equal(fragment.placements[1].timelineStartSeconds, 64.0));
+    assert(fragment.placements[2].trackId.value == "washout-sweep-fx");
+    assert(fragment.placements[2].deck == 3);
+    assert(nearly_equal(fragment.placements[2].sourceStartSeconds, 0.0));
+    assert(nearly_equal(fragment.placements[2].sourceEndSeconds.value(), sweepDurationSeconds));
+    assert(nearly_equal(fragment.placements[2].timelineStartSeconds, sweepTimelineStartSeconds));
+    assert(nearly_equal(fragment.placements[2].timelineEndSeconds.value(), sweepTimelineEndSeconds));
+    assert(fragment.placements[2].role == "fx");
 
-    assert(fragment.transition.technique == autodj::playback::TransitionTechnique::DropEndReverbExit);
-    assert(fragment.transition.templateId == "drop_end_reverb_exit_v1");
-    assert(nearly_equal(fragment.transition.timelineStartSeconds, 60.8));
-    assert(nearly_equal(fragment.transition.timelineEndSeconds, 74.0));
-    assert(nearly_equal(fragment.transition.measureCountToTarget.value(), 2.0));
+    assert(fragment.transition.technique == autodj::playback::TransitionTechnique::WashOut);
+    assert(fragment.transition.templateId == "drop_end_wash_out_v1");
+    assert(nearly_equal(fragment.transition.timelineStartSeconds, 62.4));
+    assert(nearly_equal(fragment.transition.timelineEndSeconds, 88.0));
+    assert(nearly_equal(fragment.transition.measureCountToTarget.value(), 1.0));
     assert(nearly_equal(fragment.transition.handoffTimelineSeconds.value(), 64.0));
     assert(fragment.transition.sourceAnchors.contains("fromDropEnd"));
     assert(fragment.transition.sourceAnchors.contains("toFirstBeat"));
@@ -513,11 +632,46 @@ void drop_end_reverb_exit_generates_full_ramp_fragment() {
     assert(incomingPlay != nullptr);
     assert(nearly_equal(incomingPlay->at, 64.0));
 
+    const auto* sweepLoad = find_command(fragment.commands, autodj::playback::DeckCommandType::Load, 3);
+    assert(sweepLoad != nullptr);
+    assert(nearly_equal(sweepLoad->at, sweepTimelineStartSeconds));
+    assert(sweepLoad->trackId.value == "washout-sweep-fx");
+    assert(nearly_equal(sweepLoad->cueSeconds.value(), 0.0));
+
+    const auto* sweepPlay = find_command(fragment.commands, autodj::playback::DeckCommandType::Play, 3);
+    assert(sweepPlay != nullptr);
+    assert(nearly_equal(sweepPlay->at, sweepTimelineStartSeconds));
+
+    const auto* sweepVolume = find_command(fragment.commands,
+                                           autodj::playback::DeckCommandType::Automate,
+                                           3,
+                                           autodj::playback::AutomationControl::Volume);
+    assert(sweepVolume != nullptr);
+    assert(sweepVolume->keyframes.size() == 1);
+    assert(nearly_equal(sweepVolume->keyframes[0].at, sweepTimelineStartSeconds));
+    assert(nearly_equal(sweepVolume->keyframes[0].value, 2.50));
+
     const auto* outgoingLow = find_command(fragment.commands,
                                            autodj::playback::DeckCommandType::Automate,
                                            1,
                                            autodj::playback::AutomationControl::EqLow);
-    assert(outgoingLow == nullptr);
+    assert(outgoingLow != nullptr);
+    assert(outgoingLow->keyframes.size() == 2);
+    assert(nearly_equal(outgoingLow->keyframes[0].at, 62.4));
+    assert(nearly_equal(outgoingLow->keyframes[0].value, 1.0));
+    assert(nearly_equal(outgoingLow->keyframes[1].at, 64.0));
+    assert(nearly_equal(outgoingLow->keyframes[1].value, 0.0));
+
+    const auto* outgoingHigh = find_command(fragment.commands,
+                                            autodj::playback::DeckCommandType::Automate,
+                                            1,
+                                            autodj::playback::AutomationControl::EqHigh);
+    assert(outgoingHigh != nullptr);
+    assert(outgoingHigh->keyframes.size() == 2);
+    assert(nearly_equal(outgoingHigh->keyframes[0].at, 62.4));
+    assert(nearly_equal(outgoingHigh->keyframes[0].value, 1.0));
+    assert(nearly_equal(outgoingHigh->keyframes[1].at, 64.0));
+    assert(nearly_equal(outgoingHigh->keyframes[1].value, 0.62));
 
     const auto* outgoingReverb = find_command(fragment.commands,
                                               autodj::playback::DeckCommandType::Automate,
@@ -526,12 +680,12 @@ void drop_end_reverb_exit_generates_full_ramp_fragment() {
     assert(outgoingReverb != nullptr);
     assert(outgoingReverb->postFader);
     assert(outgoingReverb->keyframes.size() == 3);
-    assert(nearly_equal(outgoingReverb->keyframes[0].at, 60.8));
+    assert(nearly_equal(outgoingReverb->keyframes[0].at, 62.4));
     assert(nearly_equal(outgoingReverb->keyframes[0].value, 0.0));
-    assert(nearly_equal(outgoingReverb->keyframes[1].at, 62.4));
-    assert(nearly_equal(outgoingReverb->keyframes[1].value, 0.6));
+    assert(nearly_equal(outgoingReverb->keyframes[1].at, 64.0));
+    assert(nearly_equal(outgoingReverb->keyframes[1].value, 1.0));
     assert(nearly_equal(outgoingReverb->keyframes[2].at, 64.0));
-    assert(nearly_equal(outgoingReverb->keyframes[2].value, 1.0));
+    assert(nearly_equal(outgoingReverb->keyframes[2].value, 0.0));
 
     const auto* outgoingVolume = find_command(fragment.commands,
                                               autodj::playback::DeckCommandType::Automate,
@@ -551,7 +705,7 @@ void drop_end_reverb_exit_generates_full_ramp_fragment() {
     assert(outgoingTail->keyframes.size() == 2);
     assert(nearly_equal(outgoingTail->keyframes[0].at, 64.0));
     assert(nearly_equal(outgoingTail->keyframes[0].value, 1.0));
-    assert(nearly_equal(outgoingTail->keyframes[1].at, 74.0));
+    assert(nearly_equal(outgoingTail->keyframes[1].at, 88.0));
     assert(nearly_equal(outgoingTail->keyframes[1].value, 0.0));
 
     const auto* incomingLow = find_command(fragment.commands,
@@ -562,7 +716,13 @@ void drop_end_reverb_exit_generates_full_ramp_fragment() {
 
     const auto* outgoingStop = find_command(fragment.commands, autodj::playback::DeckCommandType::Stop, 1);
     assert(outgoingStop != nullptr);
-    assert(nearly_equal(outgoingStop->at, 74.0));
+    assert(nearly_equal(outgoingStop->at, 88.0));
+
+    const auto* sweepStop = find_command(fragment.commands, autodj::playback::DeckCommandType::Stop, 3);
+    assert(sweepStop != nullptr);
+    assert(nearly_equal(sweepStop->at, sweepTimelineEndSeconds));
+
+    assert(fragment.annotations.size() == 3);
 }
 
 void drop_end_reverb_exit_clamps_short_drop_ramp() {
@@ -574,10 +734,10 @@ void drop_end_reverb_exit_clamps_short_drop_ramp() {
     const auto result = autodj::dj::buildDropEndReverbExitTemplate(outgoing, make_incoming_reverb_exit_track());
 
     assert(result.ok());
-    assert(contains(result.fragment->transition.riskFlags, "reverb_exit_ramp_clamped"));
+    assert(contains(result.fragment->transition.riskFlags, "wash_out_ramp_clamped"));
     assert(nearly_equal(result.fragment->transition.timelineStartSeconds, 15.0));
     assert(nearly_equal(result.fragment->transition.handoffTimelineSeconds.value(), 16.0));
-    assert(nearly_equal(result.fragment->transition.timelineEndSeconds, 26.0));
+    assert(nearly_equal(result.fragment->transition.timelineEndSeconds, 40.0));
     assert(nearly_equal(result.fragment->transition.measureCountToTarget.value(), 0.625));
 }
 
@@ -605,10 +765,10 @@ void drop_end_reverb_exit_uses_exact_start_and_end_timestamps() {
     assert(nearly_equal(fragment.placements[0].sourceStartSeconds, 8.0));
     assert(nearly_equal(fragment.placements[0].timelineStartSeconds, 5.0));
     assert(nearly_equal(fragment.placements[0].sourceEndSeconds.value(), 64.0));
-    assert(nearly_equal(fragment.placements[0].timelineEndSeconds.value(), 71.0));
-    assert(nearly_equal(fragment.transition.timelineStartSeconds, 57.8));
+    assert(nearly_equal(fragment.placements[0].timelineEndSeconds.value(), 85.0));
+    assert(nearly_equal(fragment.transition.timelineStartSeconds, 59.4));
     assert(nearly_equal(fragment.transition.handoffTimelineSeconds.value(), 61.0));
-    assert(nearly_equal(fragment.transition.timelineEndSeconds, 71.0));
+    assert(nearly_equal(fragment.transition.timelineEndSeconds, 85.0));
 
     const auto* incomingLoad = find_command(fragment.commands, autodj::playback::DeckCommandType::Load, 2);
     assert(incomingLoad != nullptr);
@@ -632,7 +792,6 @@ void dubstep_strategy_planner_scans_for_exact_bpm_drop_switch_candidate() {
 
     assert(result.ok());
     assert(result.errors.empty());
-    assert(contains_issue(result.candidateRejections, "bpm_mismatch_for_drop_switch"));
     assert(result.selectedTemplateId == "second_build_drop_switch_v1");
     assert(result.selectedIncomingTrackId.has_value());
     assert(result.selectedIncomingTrackId->value == "candidate-exact");
@@ -658,29 +817,152 @@ void dubstep_strategy_planner_scans_for_exact_bpm_drop_switch_candidate() {
     assert(parsed.plan->transitions[0].technique == autodj::playback::TransitionTechnique::BuildToDropSwap);
 }
 
-void dubstep_strategy_planner_falls_back_to_reverb_exit_without_exact_bpm_candidate() {
+void dubstep_strategy_planner_generates_one_sided_tempo_stretched_drop_switch() {
     const autodj::dj::DubstepDJStrategy strategy;
-    auto incoming = make_incoming_reverb_exit_track(151.0);
+    auto incoming = make_incoming_drop_switch_track(155.0);
+    incoming.trackId = autodj::domain::TrackId{"candidate-stretched"};
+
+    const auto result = strategy.generatePocPlan(make_outgoing_drop_switch_track(150.0), {incoming});
+
+    assert(result.ok());
+    assert(result.selectedTemplateId == "second_build_drop_switch_v1");
+    assert(result.selectedIncomingTrackId.has_value());
+    assert(result.selectedIncomingTrackId->value == "candidate-stretched");
+    const auto& plan = result.plan.value();
+    assert(plan.tracks.size() == 2);
+    const auto& incomingPlacement = plan.tracks[1];
+    assert(incomingPlacement.tempoPlan.has_value());
+    assert(nearly_equal(incomingPlacement.tempoPlan->sourceBpm.value(), 155.0));
+    assert(nearly_equal(incomingPlacement.tempoPlan->targetBpm.value(), 150.0));
+    assert(nearly_equal(incomingPlacement.tempoPlan->tempoRatio.value(), 150.0 / 155.0));
+    assert(incomingPlacement.tempoPlan->backend == "soundstretch");
+    assert(plan.transitions[0].tempoPlan.has_value());
+    assert(contains(plan.transitions[0].riskFlags, "incoming_tempo_stretch_requires_validation"));
+
+    const auto* tempo = find_command(plan.commands,
+                                     autodj::playback::DeckCommandType::Automate,
+                                     2,
+                                     autodj::playback::AutomationControl::Tempo);
+    assert(tempo != nullptr);
+    assert(nearly_equal(tempo->keyframes.front().value, 150.0 / 155.0));
+
+    const auto json = autodj::dj::serializeMixPlanJson(plan);
+    const auto parsed = autodj::playback::parseMixPlan(json);
+    assert(parsed.validation.ok);
+    assert(parsed.plan.has_value());
+    assert(parsed.plan->tracks[1].tempoPlan.has_value());
+}
+
+void dubstep_strategy_planner_can_disable_tempo_stretched_drop_switches() {
+    const autodj::dj::DubstepDJStrategy strategy;
+    auto incoming = make_incoming_drop_switch_track(155.0);
+    incoming.trackId = autodj::domain::TrackId{"candidate-stretch-disabled"};
+    autodj::dj::DubstepPocPlanOptions options;
+    options.allowTempoStretch = false;
+
+    const auto result = strategy.generatePocPlan(make_outgoing_drop_switch_track(150.0), {incoming}, options);
+
+    assert(result.ok());
+    assert(contains_issue(result.candidateRejections, "bpm_mismatch_for_drop_switch"));
+    assert(result.selectedTemplateId == "drop_end_wash_out_v1");
+    assert(!result.plan->transitions[0].tempoPlan.has_value());
+}
+
+void dubstep_strategy_planner_falls_back_to_wash_out_without_exact_bpm_candidate() {
+    const autodj::dj::DubstepDJStrategy strategy;
+    auto incoming = make_incoming_reverb_exit_track(170.0);
     incoming.trackId = autodj::domain::TrackId{"fallback-candidate"};
 
     const auto result = strategy.generatePocPlan(make_outgoing_drop_switch_track(), {incoming});
 
     assert(result.ok());
-    assert(contains_issue(result.candidateRejections, "bpm_mismatch_for_drop_switch"));
-    assert(result.selectedTemplateId == "drop_end_reverb_exit_v1");
+    assert(contains_issue(result.candidateRejections, "tempo_adjustment_over_gate"));
+    assert(result.selectedTemplateId == "drop_end_wash_out_v1");
     assert(result.selectedIncomingTrackId.has_value());
     assert(result.selectedIncomingTrackId->value == "fallback-candidate");
     assert(result.nextOutgoingTrackId.has_value());
     assert(result.nextOutgoingTrackId->value == "fallback-candidate");
     assert(result.nextOutgoingDeck == 2);
     assert(result.plan->transitions.size() == 1);
-    assert(result.plan->transitions[0].technique == autodj::playback::TransitionTechnique::DropEndReverbExit);
+    assert(result.plan->transitions[0].technique == autodj::playback::TransitionTechnique::WashOut);
 
     const auto json = autodj::dj::serializeMixPlanJson(result.plan.value());
     const auto parsed = autodj::playback::parseMixPlan(json);
     assert(parsed.validation.ok);
     assert(parsed.plan.has_value());
-    assert(parsed.plan->transitions[0].templateId == "drop_end_reverb_exit_v1");
+    assert(parsed.plan->transitions[0].templateId == "drop_end_wash_out_v1");
+}
+
+void dubstep_strategy_rejects_confident_key_clash_for_drop_switch() {
+    const autodj::dj::DubstepDJStrategy strategy;
+    auto outgoing = make_outgoing_drop_switch_track();
+    auto incoming = make_incoming_drop_switch_track();
+    set_key(outgoing, "9A", 0.92);
+    set_key(incoming, "3A", 0.9);
+
+    const auto result = strategy.generatePocPlan(outgoing, {incoming});
+
+    assert(result.ok());
+    const auto& transition = result.plan->transitions[0];
+    assert(transition.templateId == "drop_end_wash_out_v1");
+    assert(contains_issue(result.candidateRejections, "camelot_key_clash_for_drop_switch"));
+    assert(contains(transition.riskFlags, "camelot_key_clash_warning"));
+}
+
+void dubstep_strategy_prefers_compatible_drop_switch_over_key_clash() {
+    const autodj::dj::DubstepDJStrategy strategy;
+    auto outgoing = make_outgoing_drop_switch_track();
+    set_key(outgoing, "9A", 0.92);
+    auto clash = make_incoming_drop_switch_track();
+    clash.trackId = autodj::domain::TrackId{"candidate-clash"};
+    set_key(clash, "3A", 0.9);
+    auto compatible = make_incoming_drop_switch_track();
+    compatible.trackId = autodj::domain::TrackId{"candidate-compatible"};
+    set_key(compatible, "10A", 0.9);
+
+    const auto result = strategy.generatePocPlan(outgoing, {clash, compatible});
+
+    assert(result.ok());
+    assert(result.selectedIncomingTrackId.has_value());
+    assert(result.selectedIncomingTrackId->value == "candidate-compatible");
+    const auto& transition = result.plan->transitions[0];
+    assert(!contains(transition.riskFlags, "camelot_key_clash_downranked"));
+    assert(std::find_if(transition.reasons.begin(), transition.reasons.end(), [](const auto& reason) {
+               return reason.find("Camelot compatibility: adjacent") != std::string::npos;
+           }) != transition.reasons.end());
+}
+
+void dubstep_strategy_warns_but_does_not_block_wash_out_key_clash() {
+    const autodj::dj::DubstepDJStrategy strategy;
+    auto outgoing = make_outgoing_reverb_exit_track();
+    auto incoming = make_incoming_reverb_exit_track(151.0);
+    incoming.trackId = autodj::domain::TrackId{"reverb-clash-candidate"};
+    set_key(outgoing, "9A", 0.92);
+    set_key(incoming, "3A", 0.9);
+
+    const auto result = strategy.generatePocPlan(outgoing, {incoming});
+
+    assert(result.ok());
+    const auto& transition = result.plan->transitions[0];
+    assert(transition.templateId == "drop_end_wash_out_v1");
+    assert(contains(transition.riskFlags, "camelot_key_clash_warning"));
+    assert(transition.score > 0.6);
+}
+
+void dubstep_strategy_low_confidence_key_does_not_hard_reject_drop_switch() {
+    const autodj::dj::DubstepDJStrategy strategy;
+    auto outgoing = make_outgoing_drop_switch_track();
+    auto incoming = make_incoming_drop_switch_track();
+    set_key(outgoing, "9A", 0.4);
+    set_key(incoming, "3A", 0.4);
+
+    const auto result = strategy.generatePocPlan(outgoing, {incoming});
+
+    assert(result.ok());
+    assert(result.selectedTemplateId == "second_build_drop_switch_v1");
+    const auto& transition = result.plan->transitions[0];
+    assert(contains(transition.riskFlags, "key_compatibility_unknown"));
+    assert(!contains_issue(result.candidateRejections, "low_key_confidence"));
 }
 
 void dubstep_strategy_planner_rejects_when_no_template_is_valid() {
@@ -707,10 +989,11 @@ int main() {
     placeholder_plan_is_mix_plan_shaped();
     placeholder_plan_does_not_reference_audio_files();
     analysis_summary_reads_contract_fixture();
+    analysis_summary_reads_key_metadata_and_risk_flags();
     analysis_summary_orders_sections_and_cues();
     analysis_summary_rejects_invalid_artifacts();
     drop_switch_template_generates_aligned_plan_fragment();
-    drop_switch_template_clamps_incoming_source_start();
+    drop_switch_template_rejects_when_incoming_lacks_enough_predrop_beats();
     drop_switch_template_rejects_missing_sections();
     drop_switch_template_rejects_low_confidence_sections();
     drop_switch_template_rejects_exact_bpm_mismatch();
@@ -720,7 +1003,13 @@ int main() {
     drop_end_reverb_exit_rejects_missing_drop_end();
     drop_end_reverb_exit_uses_exact_start_and_end_timestamps();
     dubstep_strategy_planner_scans_for_exact_bpm_drop_switch_candidate();
-    dubstep_strategy_planner_falls_back_to_reverb_exit_without_exact_bpm_candidate();
+    dubstep_strategy_planner_generates_one_sided_tempo_stretched_drop_switch();
+    dubstep_strategy_planner_can_disable_tempo_stretched_drop_switches();
+    dubstep_strategy_planner_falls_back_to_wash_out_without_exact_bpm_candidate();
+    dubstep_strategy_rejects_confident_key_clash_for_drop_switch();
+    dubstep_strategy_prefers_compatible_drop_switch_over_key_clash();
+    dubstep_strategy_warns_but_does_not_block_wash_out_key_clash();
+    dubstep_strategy_low_confidence_key_does_not_hard_reject_drop_switch();
     dubstep_strategy_planner_rejects_when_no_template_is_valid();
 
     return 0;

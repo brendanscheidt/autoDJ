@@ -12,6 +12,8 @@ from autodj_analysis.backends import (
     BeatMarker,
     CandidateProvenance,
     FeatureBundle,
+    KeyCandidate,
+    KeyCandidateResult,
     SectionCandidate,
     SectionCandidateResult,
     TempoCandidate,
@@ -119,6 +121,29 @@ class _SectionBackend:
         )
 
 
+class _KeyBackend:
+    name = "key-a"
+
+    def analyze_key(self, audio: DecodedAudio, context: AnalysisContext) -> KeyCandidateResult:
+        return KeyCandidateResult(
+            status="ok",
+            provenance=_provenance(self.name),
+            tonic="E",
+            mode="minor",
+            camelot="9A",
+            confidence=0.82,
+            candidates=(
+                KeyCandidate(
+                    tonic="E",
+                    mode="minor",
+                    camelot="9A",
+                    confidence=0.82,
+                    backend=self.name,
+                ),
+            ),
+        )
+
+
 def test_candidate_provenance_and_context_serialize_with_camel_case() -> None:
     assert _provenance().to_dict() == {
         "backendName": "test-backend",
@@ -148,16 +173,19 @@ def test_registry_selects_swappable_backends_by_name() -> None:
     registry.register_tempo("tempo-b", lambda: _TempoBackend(150.0))
     registry.register_beat_grid("grid-a", _BeatGridBackend)
     registry.register_section("section-a", _SectionBackend)
+    registry.register_key("key-a", _KeyBackend)
 
     assert registry.tempo_names() == ("tempo-a", "tempo-b")
     assert registry.beat_grid_names() == ("grid-a",)
     assert registry.section_names() == ("section-a",)
+    assert registry.key_names() == ("key-a",)
 
     audio = _audio()
     context = _context()
     tempo = registry.create_tempo("tempo-b").analyze_tempo(audio, context)
     grid = registry.create_beat_grid("grid-a").analyze_beat_grid(audio, tempo, context)
     sections = registry.create_section("section-a").analyze_sections(audio, FeatureBundle(), grid, context)
+    key = registry.create_key("key-a").analyze_key(audio, context)
 
     assert tempo.bpm == 150.0
     assert grid.beats[0].to_dict() == {
@@ -167,6 +195,8 @@ def test_registry_selects_swappable_backends_by_name() -> None:
         "confidence": 0.88,
     }
     assert sections.sections[0].to_dict()["sourceLabel"] == "chorus"
+    assert key.to_dict()["camelot"] == "9A"
+    assert key.to_dict()["candidates"][0]["backend"] == "key-a"
 
 
 def test_registry_reports_missing_and_duplicate_backends_structurally() -> None:
@@ -226,6 +256,11 @@ def test_non_ok_results_require_structured_error() -> None:
         TempoCandidateResult(
             status="unavailable",
             provenance=CandidateProvenance(backend_name="missing-tempo"),
+        )
+    with pytest.raises(ValueError, match="non-ok key results require an error"):
+        KeyCandidateResult(
+            status="failed",
+            provenance=CandidateProvenance(backend_name="bad-key"),
         )
 
 

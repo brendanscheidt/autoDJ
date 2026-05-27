@@ -218,6 +218,13 @@ class CurrentSignalBackend:
         return self.section_result_from_features(structure_features, processing_seconds=_elapsed(start))
 
     def load_track_audio(self, track: RepositoryTrack) -> DecodedAudio:
+        if _uses_canonical_timeline(track):
+            return self._audio_loader(
+                track.source_path,
+                target_sample_rate=None,
+                source_uri=track.source_uri,
+                track_id=track.track_id,
+            )
         return self._audio_loader(
             track.source_path,
             source_uri=track.source_uri,
@@ -424,6 +431,11 @@ def _status_for_error(exc: Exception) -> str:
     if hasattr(exc, "to_dict") and dict(exc.to_dict()).get("dependency") is not None:
         return "unavailable"
     return "failed"
+
+
+def _uses_canonical_timeline(track: RepositoryTrack) -> bool:
+    analysis_audio = track.provider_metadata.get("autodjAnalysisAudio")
+    return isinstance(analysis_audio, Mapping) and analysis_audio.get("timelinePolicy") == "shared-canonical-pcm"
 
 
 def _dependency_versions() -> dict[str, str]:

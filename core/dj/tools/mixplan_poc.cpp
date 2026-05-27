@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +21,8 @@ struct CliOptions final {
 
 void printUsage(std::ostream& output) {
     output << "usage: autodj_mixplan_poc --out <dir> [--plan-id <id>] [--created-at <utc>] [--random-seed <seed>] "
+              "[--allow-tempo-stretch|--disable-tempo-stretch] "
+              "[--max-tempo-adjustment-bpm <bpm>] [--tempo-backend <name>] [--tempo-quality <quality>] "
               "[--json] <outgoing-analyzed-track.json> <incoming-analyzed-track.json>...\n";
 }
 
@@ -56,6 +59,20 @@ void printUsage(std::ostream& output) {
     return output.str();
 }
 
+[[nodiscard]] double parsePositiveDouble(const std::string& option, const std::string& value) {
+    std::size_t parsedCharacters = 0;
+    double parsed = 0.0;
+    try {
+        parsed = std::stod(value, &parsedCharacters);
+    } catch (const std::exception&) {
+        throw std::invalid_argument(option + " requires a positive number");
+    }
+    if (parsedCharacters != value.size() || !(parsed > 0.0)) {
+        throw std::invalid_argument(option + " requires a positive number");
+    }
+    return parsed;
+}
+
 [[nodiscard]] CliOptions parseArgs(const int argc, char* argv[]) {
     CliOptions options;
     std::vector<std::filesystem::path> positionals;
@@ -68,6 +85,14 @@ void printUsage(std::ostream& output) {
         }
         if (arg == "--json") {
             options.json = true;
+            continue;
+        }
+        if (arg == "--allow-tempo-stretch") {
+            options.planOptions.allowTempoStretch = true;
+            continue;
+        }
+        if (arg == "--disable-tempo-stretch") {
+            options.planOptions.allowTempoStretch = false;
             continue;
         }
         if (arg == "--out" || arg == "--plan-id" || arg == "--created-at" || arg == "--random-seed") {
@@ -83,6 +108,23 @@ void printUsage(std::ostream& output) {
                 options.planOptions.createdAtUtc = value;
             } else {
                 options.planOptions.randomSeed = value;
+            }
+            continue;
+        }
+        if (arg == "--max-tempo-adjustment-bpm" || arg == "--tempo-backend" || arg == "--tempo-backend-version"
+            || arg == "--tempo-quality") {
+            if (index + 1 >= argc || isOption(argv[index + 1])) {
+                throw std::invalid_argument(arg + " requires a value");
+            }
+            const std::string value = argv[++index];
+            if (arg == "--max-tempo-adjustment-bpm") {
+                options.planOptions.maxTempoAdjustmentBpmPerDeck = parsePositiveDouble(arg, value);
+            } else if (arg == "--tempo-backend") {
+                options.planOptions.tempoBackend = value;
+            } else if (arg == "--tempo-backend-version") {
+                options.planOptions.tempoBackendVersion = value;
+            } else {
+                options.planOptions.tempoQuality = value;
             }
             continue;
         }

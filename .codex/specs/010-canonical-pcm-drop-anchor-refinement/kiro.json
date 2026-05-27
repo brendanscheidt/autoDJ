@@ -1,0 +1,57 @@
+{
+  "id": "010-canonical-pcm-drop-anchor-refinement",
+  "title": "Canonical PCM And Drop-Anchor Refinement",
+  "specStyle": "kiro-implementation",
+  "status": "draft",
+  "sourceSpec": "../010-canonical-pcm-drop-anchor-refinement.md",
+  "documents": {
+    "requirements": "requirements.md",
+    "design": "design.md",
+    "tasks": "tasks.md"
+  },
+  "requiredSteeringContext": [
+    "../../steering/00-product-vision.md",
+    "../../steering/01-system-architecture.md",
+    "../../steering/02-core-contracts.md",
+    "../../steering/03-tech-stack.md",
+    "../../steering/04-project-structure.md",
+    "../../steering/05-dubstep-dj-strategy.md",
+    "../../steering/06-playback-engine.md",
+    "../../steering/07-analysis-pipeline.md",
+    "../../steering/08-engineering-practices.md",
+    "../../steering/09-roadmap.md"
+  ],
+  "decisionGates": [
+    {
+      "id": "canonical-pcm-verdict",
+      "description": "After canonical PCM cache implementation, verify that analysis, debug waveform, nudge, and render all reference the same timing source."
+    },
+    {
+      "id": "drop-candidate-feature-verdict",
+      "description": "After feature extraction and candidate export, inspect reports to confirm candidate features are interpretable and useful."
+    },
+    {
+      "id": "drop-anchor-audition-verdict",
+      "description": "After generating drop-switch auditions from refined anchors, stop for user listening verdict before changing defaults."
+    }
+  ],
+  "subagentExecutionRules": [
+    "Read this kiro.json, requirements.md, design.md, tasks.md, and all required steering context before executing tasks.",
+    "Use Rekordbox XML labels only as semantic truth/evaluation labels in this spec; do not leak them into automatic anchor selection except where a command explicitly benchmarks against truth.",
+    "Do not train a production ML model on only the current 48 songs. The 48-track set is for regression, feature inspection, and audition, not final training.",
+    "Do not replace the current working nudge path until the refined anchor path has generated audition artifacts and the user has accepted the result.",
+    "Do not independently snap every beat in the beatgrid. Any beatgrid refinement must preserve global phase and tempo continuity.",
+    "Use canonical PCM for every timing-sensitive path. Do not mix decoder outputs for analysis, waveform, nudge, and render.",
+    "Any transform that changes timing must emit sample-rate, frame-centering, hop-length, and source-timeline provenance.",
+    "Write generated PCM, feature stores, datasets, audition WAVs, and debug artifacts only under ignored local paths.",
+    "Stop at manual decision gates and record the user's verdict before marking those tasks complete."
+  ],
+  "verificationCommands": {
+    "cppConfigure": "cmake --preset debug",
+    "cppBuild": "cmake --build --preset debug",
+    "cppTest": "ctest --preset debug --output-on-failure",
+    "contractValidation": "ctest --preset debug -R autodj_contract_examples --output-on-failure",
+    "pythonTests": "wsl -d Ubuntu-24.04 -- bash -lc \"cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && pytest analysis/worker-python/tests\""
+  }
+}
+

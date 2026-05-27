@@ -303,6 +303,23 @@ def test_cli_analyze_batch_help_lists_expected_options(capsys) -> None:
     assert "--force" in captured.out
     assert "--parameters-hash" in captured.out
     assert "--section-backend" in captured.out
+    assert "--canonical-audio-root" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_canonicalize_audio_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["canonicalize-audio", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "repository_manifest" in captured.out
+    assert "--out" in captured.out
+    assert "--ffmpeg" in captured.out
+    assert "--ffprobe" in captured.out
+    assert "--force" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--fallback-sample-rate" in captured.out
     assert "--json" in captured.out
 
 
@@ -343,6 +360,52 @@ def test_cli_benchmark_sections_help_lists_expected_options(capsys) -> None:
     assert "--debug-waveform-points" in captured.out
 
 
+def test_cli_benchmark_keys_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["benchmark-keys", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "rekordbox_xml" in captured.out
+    assert "--candidates" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_tempo_stretch_smoke_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["tempo-stretch-smoke", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "--audio" in captured.out
+    assert "--source-bpm" in captured.out
+    assert "--target-bpm" in captured.out
+    assert "--backends" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--quality" in captured.out
+    assert "--target-bpm-bias" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_stretch_audio_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["stretch-audio", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "audio_path" in captured.out
+    assert "--source-bpm" in captured.out
+    assert "--target-bpm" in captured.out
+    assert "--backend" in captured.out
+    assert "--out" in captured.out
+    assert "--report" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--quality" in captured.out
+    assert "--target-bpm-bias" in captured.out
+    assert "--json" in captured.out
+
+
 def test_cli_render_mixplan_help_lists_expected_options(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["render-mixplan", "--help"])
@@ -352,6 +415,8 @@ def test_cli_render_mixplan_help_lists_expected_options(capsys) -> None:
     assert "mix_plan" in captured.out
     assert "--asset-root" in captured.out
     assert "--sample-rate" in captured.out
+    assert "--tempo-backend" in captured.out
+    assert "--tempo-quality" in captured.out
     assert "--json" in captured.out
 
 
@@ -364,6 +429,24 @@ def test_cli_rank_drop_anchors_help_lists_expected_options(capsys) -> None:
     assert "analyzed_track" in captured.out
     assert "--out" in captured.out
     assert "--max-candidates" in captured.out
+    assert "--json" in captured.out
+
+
+def test_cli_drop_wall_debug_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["drop-wall-debug", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "audio_path" in captured.out
+    assert "--time" in captured.out
+    assert "--out" in captured.out
+    assert "--svg" in captured.out
+    assert "--track-id" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--search-window-ms" in captured.out
+    assert "--preferred-window-ms" in captured.out
+    assert "--preferred-score-ratio" in captured.out
     assert "--json" in captured.out
 
 
@@ -450,6 +533,8 @@ def test_cli_nudge_mixplan_help_lists_expected_options(capsys) -> None:
     assert "--asset-root" in captured.out
     assert "--window-ms" in captured.out
     assert "--max-nudge-ms" in captured.out
+    assert "--refined-anchor-report" not in captured.out
+    assert "--use-refined-anchors" not in captured.out
     assert "--json" in captured.out
 
 
@@ -484,6 +569,19 @@ def test_cli_export_rekordbox_xml_help_lists_expected_options(capsys) -> None:
     assert "--cue-policy" in captured.out
     assert "--max-hot-cues" in captured.out
     assert "--time-precision" in captured.out
+
+
+def test_cli_apply_rekordbox_semantics_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["apply-rekordbox-semantics", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "analyzed_track" in captured.out
+    assert "rekordbox_xml" in captured.out
+    assert "--out" in captured.out
+    assert "--track-name" in captured.out
+    assert "--json" in captured.out
 
 
 def test_cli_parse_transition_template_help_lists_expected_options(capsys) -> None:
@@ -537,6 +635,72 @@ def test_cli_export_rekordbox_xml_writes_xml(tmp_path, capsys) -> None:
     assert payload["artifact"] == "rekordbox-xml"
     assert 'AverageBpm="140.00"' in xml_text
     assert 'Name="drop_1_start"' in xml_text
+
+
+def test_cli_apply_rekordbox_semantics_preserves_tempo_grid(tmp_path, capsys) -> None:
+    analyzed_path = tmp_path / "analyzed-track.json"
+    analyzed_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "1.0.0",
+                "trackId": "track-a",
+                "durationSeconds": 64.0,
+                "source": {"providerMetadata": {}},
+                "analyzer": {},
+                "tempo": {
+                    "bpm": 150.0,
+                    "normalizedBpm": 150.0,
+                    "confidence": 0.9,
+                    "candidates": [{"backend": "autodj-test", "bpm": 150.0}],
+                },
+                "beatGrid": {
+                    "beats": [{"index": 88, "timeSeconds": 32.05, "confidence": 0.9}],
+                    "downbeats": [],
+                    "confidence": 0.8,
+                },
+                "sections": [],
+                "cuePoints": [],
+                "quality": {"overallConfidence": 0.8, "warnings": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    xml_path = tmp_path / "rekordbox.xml"
+    xml_path.write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0">
+  <COLLECTION Entries="1">
+    <TRACK Name="Track A" AverageBpm="140.00" Location="file://localhost/C:/Music/track-a.mp3">
+      <TEMPO Inizio="0.000" Bpm="140.00" Metro="4/4" Battito="1"/>
+      <POSITION_MARK Name="drop_1_start" Type="0" Start="32.000" Num="0"/>
+    </TRACK>
+  </COLLECTION>
+</DJ_PLAYLISTS>
+""",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "semantic.json"
+
+    exit_code = main(
+        [
+            "apply-rekordbox-semantics",
+            str(analyzed_path),
+            str(xml_path),
+            "--out",
+            str(output_path),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["mode"] == "semantic_only"
+    assert artifact["tempo"]["candidates"][0]["backend"] == "autodj-test"
+    assert artifact["beatGrid"]["beats"][0]["index"] == 88
+    assert artifact["cuePoints"][0]["beatIndex"] == 88
 
 
 def test_cli_parse_transition_template_writes_json(tmp_path, capsys) -> None:
@@ -632,8 +796,47 @@ def test_cli_debug_waveform_writes_rgb_artifact(tmp_path, capsys) -> None:
     assert payload["ok"] is True
     assert payload["artifact"] == "debug-waveform"
     assert payload["points"] == 32
+    assert payload["sourceTimelinePolicy"] == "direct-audio-path"
     assert artifact["artifactType"] == "debug-waveform"
+    assert artifact["source"]["audioPath"] == str(fixture.path)
+    assert artifact["source"]["timelinePolicy"] == "direct-audio-path"
     assert artifact["points"][0]["low"] >= 0.0
+
+
+@pytest.mark.analysis
+def test_cli_debug_waveform_reports_canonical_timeline_policy(tmp_path, capsys) -> None:
+    _skip_without_debug_dependencies()
+    canonical_dir = tmp_path / "tracks" / "track-a"
+    canonical_dir.mkdir(parents=True)
+    canonical_wav = canonical_dir / "canonical.wav"
+    _write_cli_gain_wav(canonical_wav, sample_rate=8_000, amplitude=0.25)
+    (canonical_dir / "canonical-audio.json").write_text("{}", encoding="utf-8")
+    output_path = tmp_path / "debug-waveform.json"
+
+    exit_code = main(
+        [
+            "debug-waveform",
+            str(canonical_wav),
+            "--out",
+            str(output_path),
+            "--points",
+            "32",
+            "--sample-rate",
+            "8000",
+            "--track-id",
+            "track-a",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["sourceTimelinePolicy"] == "shared-canonical-pcm"
+    assert artifact["source"]["timelinePolicy"] == "shared-canonical-pcm"
 
 
 def test_cli_analyze_batch_json_summary_output(tmp_path, capsys) -> None:
@@ -672,6 +875,122 @@ def test_cli_analyze_batch_json_summary_output(tmp_path, capsys) -> None:
     assert seen_commands[0][0] == "fake-ffprobe"
     assert artifact["analyzer"]["parametersHash"] == "sha256:cli-params"
     assert waveform_path(cache_root, "track-a").exists()
+
+
+def test_cli_analyze_batch_can_use_canonical_audio_root(tmp_path, capsys) -> None:
+    manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
+    cache_root = tmp_path / ".autodj-cache"
+    canonical_root = tmp_path / "canonical-cache"
+    canonical_track_dir = canonical_root / "tracks" / "track-a"
+    canonical_track_dir.mkdir(parents=True)
+    canonical_wav = canonical_track_dir / "canonical.wav"
+    canonical_wav.write_bytes(b"fake canonical wav")
+    seen = {}
+    base_analyzer = _signal_analyzer()
+
+    def analyzer(track, identity, created_at_utc):
+        seen["source_path"] = track.source_path
+        seen["source_uri"] = track.source_uri
+        return base_analyzer(track, identity, created_at_utc)
+
+    exit_code = main(
+        [
+            "analyze-batch",
+            str(manifest_path),
+            "--out",
+            str(cache_root),
+            "--canonical-audio-root",
+            str(canonical_root),
+            "--json",
+        ],
+        probe_runner=_runner(_ffprobe_payload()),
+        signal_analyzer=analyzer,
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    artifact = json.loads(analyzed_track_path(cache_root, "track-a").read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert seen["source_path"] == canonical_wav
+    assert seen["source_uri"] == "track-a.mp3"
+    assert artifact["analyzer"]["parametersHash"].endswith("+canonical-pcm-v1")
+    assert artifact["source"]["sourceUri"] == "track-a.mp3"
+    assert artifact["source"]["providerMetadata"]["autodjAnalysisAudio"] == {
+        "timelinePolicy": "shared-canonical-pcm",
+        "canonicalPath": str(canonical_wav),
+        "canonicalMetadataPath": str(canonical_track_dir / "canonical-audio.json"),
+    }
+
+
+def test_cli_canonicalize_audio_json_summary_output(tmp_path, capsys) -> None:
+    manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
+    cache_root = tmp_path / ".autodj-cache"
+    seen = {}
+
+    def runner(repository_manifest, output_root, **kwargs):
+        seen["repository_manifest"] = repository_manifest
+        seen["output_root"] = output_root
+        seen["options"] = kwargs["options"]
+        return {
+            "ok": True,
+            "artifact": "canonical-audio-batch",
+            "manifestPath": str(repository_manifest),
+            "outputRoot": str(output_root),
+            "total": 1,
+            "canonicalized": 1,
+            "skipped": 0,
+            "failed": 0,
+            "tracks": [
+                {
+                    "trackId": "track-a",
+                    "sourcePath": str(tmp_path / "music" / "track-a.mp3"),
+                    "canonicalPath": str(cache_root / "tracks" / "track-a" / "canonical.wav"),
+                    "metadataPath": str(cache_root / "tracks" / "track-a" / "canonical-audio.json"),
+                    "status": "canonicalized",
+                    "sourceContentHash": "sha256:a",
+                    "sampleRate": 48000,
+                    "channels": 1,
+                    "durationSeconds": 12.5,
+                    "warnings": [],
+                }
+            ],
+        }
+
+    exit_code = main(
+        [
+            "canonicalize-audio",
+            str(manifest_path),
+            "--out",
+            str(cache_root),
+            "--ffmpeg",
+            "fake-ffmpeg",
+            "--ffprobe",
+            "fake-ffprobe",
+            "--sample-rate",
+            "48000",
+            "--force",
+            "--json",
+        ],
+        canonical_audio_runner=runner,
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["artifact"] == "canonical-audio-batch"
+    assert payload["canonicalized"] == 1
+    assert seen["repository_manifest"] == manifest_path
+    assert seen["output_root"] == cache_root
+    assert seen["options"].ffmpeg_path == "fake-ffmpeg"
+    assert seen["options"].ffprobe_path == "fake-ffprobe"
+    assert seen["options"].target_sample_rate == 48000
+    assert seen["options"].force is True
 
 
 def test_cli_benchmark_timing_json_summary_output(tmp_path, capsys) -> None:
@@ -792,6 +1111,174 @@ def test_cli_benchmark_sections_json_summary_output(tmp_path, capsys) -> None:
     assert seen["kwargs"]["candidates"] == ("current-autodj-signal", "songformer")
     assert seen["kwargs"]["analysis_sample_rate"] == 44100
     assert seen["kwargs"]["debug_waveform_points"] == 2048
+
+
+def test_cli_benchmark_keys_json_summary_output(tmp_path, capsys) -> None:
+    audio_path = tmp_path / "track-a.mp3"
+    audio_path.write_bytes(b"audio")
+    xml_path = tmp_path / "rekordbox.xml"
+    xml_path.write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0">
+  <COLLECTION Entries="1">
+    <TRACK Name="Track A" AverageBpm="150.00" Tonality="9A" Location="{audio_path.as_uri()}">
+      <TEMPO Inizio="0.000" Bpm="150.00" Metro="4/4" Battito="1"/>
+    </TRACK>
+  </COLLECTION>
+</DJ_PLAYLISTS>
+""",
+        encoding="utf-8",
+    )
+    seen = {}
+
+    def runner(cases, output_root, **kwargs):
+        seen["cases"] = cases
+        seen["output_root"] = output_root
+        seen["kwargs"] = kwargs
+        return {
+            "ok": True,
+            "reportType": "key-candidate-benchmark",
+            "outputRoot": str(output_root),
+            "cases": [],
+            "candidateSummary": [],
+        }
+
+    exit_code = main(
+        [
+            "benchmark-keys",
+            str(xml_path),
+            "--out",
+            str(tmp_path / "key-benchmark"),
+            "--candidates",
+            "essentia-key,keyfinder",
+            "--sample-rate",
+            "44100",
+            "--json",
+        ],
+        key_benchmark_runner=runner,
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["reportType"] == "key-candidate-benchmark"
+    assert seen["cases"][0].track_name == "Track A"
+    assert seen["cases"][0].truth.camelot.camelot == "9A"
+    assert seen["kwargs"]["candidates"] == ("essentia-key", "keyfinder")
+    assert seen["kwargs"]["analysis_sample_rate"] == 44100
+
+
+def test_cli_tempo_stretch_smoke_json_summary_output(tmp_path, capsys) -> None:
+    audio_path = tmp_path / "track.wav"
+    audio_path.write_bytes(b"placeholder")
+    seen = {}
+
+    def runner(audio_path_arg, output_root, **kwargs):
+        seen["audio_path"] = audio_path_arg
+        seen["output_root"] = output_root
+        seen["kwargs"] = kwargs
+        return {
+            "ok": True,
+            "artifact": "tempo-stretch-smoke-report",
+            "outputRoot": str(output_root),
+            "results": [],
+        }
+
+    exit_code = main(
+        [
+            "tempo-stretch-smoke",
+            "--audio",
+            str(audio_path),
+            "--source-bpm",
+            "160",
+            "--target-bpm",
+            "150",
+            "--out",
+            str(tmp_path / "stretch-smoke"),
+            "--backends",
+            "rubberband,soundstretch",
+            "--sample-rate",
+            "48000",
+            "--quality",
+            "fast",
+            "--target-bpm-bias",
+            "0.02",
+            "--json",
+        ],
+        tempo_stretch_smoke_runner=runner,
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["artifact"] == "tempo-stretch-smoke-report"
+    assert seen["audio_path"] == audio_path
+    assert seen["kwargs"]["backends"] == ("rubberband", "soundstretch")
+    assert seen["kwargs"]["source_bpm"] == 160.0
+    assert seen["kwargs"]["target_bpm"] == 150.0
+    assert seen["kwargs"]["sample_rate"] == 48000
+    assert seen["kwargs"]["quality"] == "fast"
+    assert seen["kwargs"]["target_bpm_bias"] == 0.02
+
+
+def test_cli_stretch_audio_json_summary_output(tmp_path, capsys) -> None:
+    audio_path = tmp_path / "track.wav"
+    audio_path.write_bytes(b"placeholder")
+    seen = {}
+
+    def runner(audio_path_arg, output_path, **kwargs):
+        seen["audio_path"] = audio_path_arg
+        seen["output_path"] = output_path
+        seen["kwargs"] = kwargs
+        return {
+            "ok": True,
+            "artifact": "tempo-stretch-report",
+            "outputPath": str(output_path),
+            "backendName": kwargs["options"].backend,
+            "sourceBpm": kwargs["options"].source_bpm,
+            "targetBpm": kwargs["options"].target_bpm,
+        }
+
+    exit_code = main(
+        [
+            "stretch-audio",
+            str(audio_path),
+            "--source-bpm",
+            "160",
+            "--target-bpm",
+            "150",
+            "--backend",
+            "rubberband",
+            "--out",
+            str(tmp_path / "stretched.wav"),
+            "--report",
+            str(tmp_path / "stretch-report.json"),
+            "--sample-rate",
+            "48000",
+            "--quality",
+            "fine",
+            "--target-bpm-bias",
+            "0.02",
+            "--json",
+        ],
+        tempo_stretch_runner=runner,
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["artifact"] == "tempo-stretch-report"
+    assert payload["backendName"] == "rubberband"
+    assert payload["sourceBpm"] == 160.0
+    assert payload["targetBpm"] == 150.0
+    assert seen["audio_path"] == audio_path
+    assert seen["kwargs"]["report_path"] == tmp_path / "stretch-report.json"
+    assert seen["kwargs"]["options"].sample_rate == 48000
+    assert seen["kwargs"]["options"].target_bpm_bias == 0.02
 
 
 def test_cli_analyze_batch_successful_human_output(tmp_path, capsys) -> None:

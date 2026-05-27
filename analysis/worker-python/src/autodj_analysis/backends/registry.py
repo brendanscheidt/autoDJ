@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Generic, Literal, TypeVar
 
-from .base import BeatGridBackend, SectionBackend, TempoBackend
+from .base import BeatGridBackend, KeyDetectorBackend, SectionBackend, TempoBackend
 
 
-BackendKind = Literal["tempo", "beat_grid", "section"]
+BackendKind = Literal["tempo", "beat_grid", "section", "key"]
 TBackend = TypeVar("TBackend")
 
 
@@ -73,6 +73,7 @@ class BackendRegistry:
         self._tempo = _BackendFactories[TempoBackend]("tempo")
         self._beat_grid = _BackendFactories[BeatGridBackend]("beat_grid")
         self._section = _BackendFactories[SectionBackend]("section")
+        self._key = _BackendFactories[KeyDetectorBackend]("key")
 
     def register_tempo(self, name: str, factory: Callable[[], TempoBackend]) -> None:
         self._tempo.register(name, factory)
@@ -83,6 +84,9 @@ class BackendRegistry:
     def register_section(self, name: str, factory: Callable[[], SectionBackend]) -> None:
         self._section.register(name, factory)
 
+    def register_key(self, name: str, factory: Callable[[], KeyDetectorBackend]) -> None:
+        self._key.register(name, factory)
+
     def create_tempo(self, name: str) -> TempoBackend:
         return self._tempo.create(name)
 
@@ -92,6 +96,9 @@ class BackendRegistry:
     def create_section(self, name: str) -> SectionBackend:
         return self._section.create(name)
 
+    def create_key(self, name: str) -> KeyDetectorBackend:
+        return self._key.create(name)
+
     def tempo_names(self) -> tuple[str, ...]:
         return self._tempo.names()
 
@@ -100,3 +107,6 @@ class BackendRegistry:
 
     def section_names(self) -> tuple[str, ...]:
         return self._section.names()
+
+    def key_names(self) -> tuple[str, ...]:
+        return self._key.names()

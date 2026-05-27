@@ -9,7 +9,7 @@ import json
 import math
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlparse
 import zlib
@@ -59,6 +59,7 @@ class RekordboxTrack:
     name: str
     location: str
     average_bpm: float | None
+    tonality: str | None
     tempos: tuple[RekordboxTempo, ...]
     cues: tuple[RekordboxCue, ...]
 
@@ -112,6 +113,7 @@ def load_rekordbox_tracks(xml_path: str | Path) -> tuple[RekordboxTrack, ...]:
                 name=track.get("Name", ""),
                 location=track.get("Location", ""),
                 average_bpm=_optional_float(track.get("AverageBpm")),
+                tonality=track.get("Tonality"),
                 tempos=tempos,
                 cues=cues,
             )
@@ -182,6 +184,81 @@ def apply_rekordbox_overrides(
     analyzer["rekordboxXmlAppliedAtUtc"] = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     return artifact
+
+
+def apply_rekordbox_semantic_overrides(
+    analyzed_artifact: dict[str, Any],
+    rekordbox_track: RekordboxTrack,
+) -> dict[str, Any]:
+    """Return an analyzed artifact with only Rekordbox semantic cues applied.
+
+    This preserves the existing AutoDJ tempo, beat grid, and key analysis while
+    replacing sections/cue points with manually labeled Rekordbox markers.
+    """
+
+    artifact = copy.deepcopy(analyzed_artifact)
+    duration_seconds = float(artifact.get("durationSeconds") or 0.0)
+    if duration_seconds <= 0:
+        duration_seconds = _duration_from_cues_or_grid(rekordbox_track)
+
+    beat_index_for_time = _beat_index_from_analyzed_artifact(artifact)
+    sections, cue_points = _semantic_sections_and_cues_from_rekordbox(
+        rekordbox_track,
+        duration_seconds,
+        beat_index_for_time=beat_index_for_time,
+    )
+    artifact["sections"] = sections
+    artifact["cuePoints"] = cue_points
+
+    source = artifact.setdefault("source", {})
+    provider_metadata = source.setdefault("providerMetadata", {})
+    provider_metadata["rekordboxSemanticXml"] = {
+        "trackName": rekordbox_track.name,
+        "location": rekordbox_track.location,
+        "averageBpm": rekordbox_track.average_bpm,
+        "preservedTempoBackend": artifact.get("tempo", {}).get("candidates", [{}])[0].get("backend"),
+        "preservedBeatGridConfidence": artifact.get("beatGrid", {}).get("confidence"),
+    }
+
+    quality = artifact.setdefault("quality", {})
+    warnings = list(quality.get("warnings") or [])
+    semantic_warning = (
+        "Rekordbox XML semantic cue labels were applied while preserving AutoDJ "
+        "tempo, beat grid, and key analysis."
+    )
+    if semantic_warning not in warnings:
+        warnings.insert(0, semantic_warning)
+    quality["warnings"] = warnings
+
+    analyzer = artifact.setdefault("analyzer", {})
+    analyzer["rekordboxSemanticXmlAppliedAtUtc"] = (
+        datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+
+    return artifact
+
+
+def apply_rekordbox_semantic_xml_file(
+    analyzed_path: str | Path,
+    rekordbox_xml_path: str | Path,
+    output_path: str | Path,
+    *,
+    track_name: str | None = None,
+) -> Path:
+    """Load analyzed JSON and Rekordbox XML, then write semantic-only overrides."""
+
+    try:
+        analyzed = json.loads(Path(analyzed_path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RekordboxXmlError("analyzed_artifact_read_error", f"Could not read analyzed artifact: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise RekordboxXmlError("analyzed_artifact_parse_error", f"Could not parse analyzed artifact JSON: {exc}") from exc
+    if not isinstance(analyzed, dict):
+        raise RekordboxXmlError("analyzed_artifact_invalid", "Analyzed artifact root must be a JSON object")
+
+    rekordbox_track = load_rekordbox_track(rekordbox_xml_path, track_name=track_name)
+    artifact = apply_rekordbox_semantic_overrides(analyzed, rekordbox_track)
+    return write_json_atomic(output_path, artifact)
 
 
 def apply_rekordbox_xml_file(
@@ -388,13 +465,26 @@ def _sections_and_cues_from_rekordbox(
     tempo: RekordboxTempo,
     duration_seconds: float,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    return _semantic_sections_and_cues_from_rekordbox(
+        rekordbox_track,
+        duration_seconds,
+        beat_index_for_time=lambda seconds: _beat_index(seconds, tempo),
+    )
+
+
+def _semantic_sections_and_cues_from_rekordbox(
+    rekordbox_track: RekordboxTrack,
+    duration_seconds: float,
+    *,
+    beat_index_for_time: Callable[[float], int],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     named_boundaries = boundaries_from_named_cues(rekordbox_track.cues, provider_name="rekordbox")
     if named_boundaries:
         return sections_and_cue_points_from_boundaries(
             named_boundaries,
             duration_seconds=duration_seconds,
             provider_name=REKORDBOX_XML_BACKEND,
-            beat_index_for_time=lambda seconds: _beat_index(seconds, tempo),
+            beat_index_for_time=beat_index_for_time,
         )
 
     cues = list(rekordbox_track.cues)
@@ -415,15 +505,15 @@ def _sections_and_cues_from_rekordbox(
                     "startSeconds": _round_float(start_cue.start_seconds),
                     "endSeconds": _round_float(end_cue.start_seconds),
                     "confidence": 1.0,
-                    "startBeatIndex": _beat_index(start_cue.start_seconds, tempo),
-                    "endBeatIndex": _beat_index(end_cue.start_seconds, tempo),
+                    "startBeatIndex": beat_index_for_time(start_cue.start_seconds),
+                    "endBeatIndex": beat_index_for_time(end_cue.start_seconds),
                     "source": REKORDBOX_XML_BACKEND,
                 }
             )
 
-        cue_points.append(_cue_point_from_rekordbox(start_cue, "drop", section_id, tempo))
+        cue_points.append(_cue_point_from_rekordbox_with_beat_index(start_cue, "drop", section_id, beat_index_for_time))
         if end_cue is not None:
-            cue_points.append(_cue_point_from_rekordbox(end_cue, "mix_out", section_id, tempo))
+            cue_points.append(_cue_point_from_rekordbox_with_beat_index(end_cue, "mix_out", section_id, beat_index_for_time))
 
     cue_points.sort(key=lambda cue: float(cue["timeSeconds"]))
     return sections, cue_points
@@ -435,6 +525,20 @@ def _cue_point_from_rekordbox(
     section_id: str,
     tempo: RekordboxTempo,
 ) -> dict[str, Any]:
+    return _cue_point_from_rekordbox_with_beat_index(
+        cue,
+        cue_type,
+        section_id,
+        lambda seconds: _beat_index(seconds, tempo),
+    )
+
+
+def _cue_point_from_rekordbox_with_beat_index(
+    cue: RekordboxCue,
+    cue_type: str,
+    section_id: str,
+    beat_index_for_time: Callable[[float], int],
+) -> dict[str, Any]:
     cue_point: dict[str, Any] = {
         "id": f"cue-rekordbox-{_cue_label(cue).lower()}",
         "type": cue_type,
@@ -442,7 +546,7 @@ def _cue_point_from_rekordbox(
         "sectionId": section_id,
         "confidence": 1.0,
         "tags": ["rekordbox_xml", f"hot_cue_{_cue_label(cue)}"],
-        "beatIndex": _beat_index(cue.start_seconds, tempo),
+        "beatIndex": beat_index_for_time(cue.start_seconds),
         "rekordboxNum": cue.num,
         "color": dict(cue.color),
     }
@@ -454,6 +558,40 @@ def _cue_point_from_rekordbox(
 def _beat_index(time_seconds: float, tempo: RekordboxTempo) -> int:
     period_seconds = 60.0 / tempo.bpm
     return max(0, round((time_seconds - tempo.start_seconds) / period_seconds))
+
+
+def _beat_index_from_analyzed_artifact(artifact: dict[str, Any]) -> Callable[[float], int]:
+    beats = list(artifact.get("beatGrid", {}).get("beats") or [])
+    indexed_times: list[tuple[int, float]] = []
+    for fallback_index, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            continue
+        try:
+            beat_time = float(beat["timeSeconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            beat_index = int(beat.get("index", fallback_index))
+        except (TypeError, ValueError):
+            beat_index = fallback_index
+        indexed_times.append((beat_index, beat_time))
+
+    indexed_times.sort(key=lambda item: item[1])
+    if indexed_times:
+        def nearest_beat_index(time_seconds: float) -> int:
+            target = float(time_seconds)
+            best_index, _ = min(indexed_times, key=lambda item: abs(item[1] - target))
+            return max(0, best_index)
+
+        return nearest_beat_index
+
+    bpm = float(artifact.get("tempo", {}).get("normalizedBpm") or artifact.get("tempo", {}).get("bpm") or 0.0)
+    period_seconds = 60.0 / bpm if bpm > 0 else 0.5
+
+    def estimated_beat_index(time_seconds: float) -> int:
+        return max(0, round(float(time_seconds) / period_seconds))
+
+    return estimated_beat_index
 
 
 def _cue_label(cue: RekordboxCue) -> str:
