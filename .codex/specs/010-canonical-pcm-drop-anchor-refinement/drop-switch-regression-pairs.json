@@ -1,0 +1,52 @@
+[
+  {
+    "outgoing": "alleycvt-strangers-spotisaver",
+    "incoming": "ydg-let-s-go-back-spotisaver",
+    "notes": "Golden 145 BPM pair used for the original hand-authored drop switch."
+  },
+  {
+    "outgoing": "barely-alive-chicken-jockey-spotisaver",
+    "incoming": "bear-grillz-usaybflow-bing-bong-spotisaver",
+    "notes": "Earlier generated same-BPM drop switch with clean raw nudge."
+  },
+  {
+    "outgoing": "layz-rzrkt-hardest-mfs-spotisaver",
+    "incoming": "layz-shockwave-spotisaver",
+    "notes": "Dense brick-wall outgoing track; useful stress case for anchor confidence."
+  },
+  {
+    "outgoing": "layz-shockwave-spotisaver",
+    "incoming": "mersiv-conrank-lights-go-down-spotisaver",
+    "notes": "Known prior bad alignment before the stricter nudge interpretation."
+  },
+  {
+    "outgoing": "calcium-dead-instinct-spotisaver",
+    "incoming": "dion-timmer-alarma-spotisaver",
+    "notes": "Known prior bad alignment before the stricter nudge interpretation."
+  },
+  {
+    "outgoing": "calcium-chillin-spotisaver",
+    "incoming": "kompany-careless-castle-jawbreaker-spotisaver",
+    "notes": "Layered-drop smoke failure: anchor looked visually plausible but sounded off."
+  },
+  {
+    "outgoing": "cromatik-doom-sequence-spotisaver",
+    "incoming": "levity-postman-spotisaver",
+    "notes": "Layered-drop smoke failure with ambiguous competing candidate walls."
+  },
+  {
+    "outgoing": "dack-janiels-shock-therapy-spotisaver",
+    "incoming": "effin-tape-b-ups-and-downs-spotisaver",
+    "notes": "140 BPM same-BPM regression pair from earlier batch generation."
+  },
+  {
+    "outgoing": "eptic-space-laces-crash-out-spotisaver",
+    "incoming": "heyz-dnmo-maylyn-turn-the-tide-spotisaver",
+    "notes": "145 BPM same-BPM pair from earlier batch generation."
+  },
+  {
+    "outgoing": "subtronics-wooli-lock-in-spotisaver",
+    "incoming": "ooph-hooyah-spotisaver",
+    "notes": "145 BPM same-BPM pair to keep the regression batch from overfitting only earlier failures."
+  }
+]

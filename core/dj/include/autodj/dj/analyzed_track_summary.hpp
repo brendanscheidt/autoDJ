@@ -42,6 +42,17 @@ struct AnalyzedCuePoint final {
     std::vector<std::string> tags;
 };
 
+struct AnalyzedKey final {
+    std::string tonic;
+    std::string mode;
+    std::string camelot;
+    double confidence{0.0};
+    std::string backendName;
+    std::string modelName;
+
+    [[nodiscard]] bool known() const noexcept { return !camelot.empty() && confidence > 0.0; }
+};
+
 struct TrackAnalysisSummary final {
     static constexpr int beatsPerMeasure = 4;
 
@@ -51,6 +62,7 @@ struct TrackAnalysisSummary final {
     std::optional<double> rawBpm;
     double normalizedBpm{0.0};
     double tempoConfidence{0.0};
+    AnalyzedKey key;
     double beatGridConfidence{0.0};
     double overallConfidence{0.0};
     std::vector<AnalyzedBeat> beats;

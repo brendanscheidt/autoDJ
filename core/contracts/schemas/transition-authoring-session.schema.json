@@ -29,6 +29,7 @@
         "drop_switch",
         "double_drop",
         "reverb_exit",
+        "wash_out",
         "custom"
       ]
     },

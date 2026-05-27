@@ -66,9 +66,72 @@
       "minimum": 0,
       "maximum": 1
     },
+    "bpm": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
     "timeSeconds": {
       "type": "number",
       "minimum": 0
+    },
+    "tempoPlan": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "sourceBpm": {
+          "$ref": "#/$defs/bpm"
+        },
+        "targetBpm": {
+          "$ref": "#/$defs/bpm"
+        },
+        "tempoRatio": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "preservePitch": {
+          "type": "boolean"
+        },
+        "backend": {
+          "type": "string",
+          "minLength": 1
+        },
+        "backendVersion": {
+          "type": "string"
+        },
+        "quality": {
+          "type": "string"
+        },
+        "renderedSourceUri": {
+          "type": "string"
+        },
+        "renderedContentHash": {
+          "type": "string"
+        },
+        "targetBpmBias": {
+          "type": "number"
+        },
+        "validatedBpm": {
+          "$ref": "#/$defs/bpm"
+        },
+        "validationStatus": {
+          "enum": [
+            "not_required",
+            "pending",
+            "passed",
+            "warning",
+            "failed"
+          ]
+        },
+        "requiresRenderedBpmValidation": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     },
     "strategyProvenance": {
       "type": "object",
@@ -121,6 +184,12 @@
         },
         "durationSeconds": {
           "$ref": "#/$defs/timeSeconds"
+        },
+        "sourceBpm": {
+          "$ref": "#/$defs/bpm"
+        },
+        "normalizedBpm": {
+          "$ref": "#/$defs/bpm"
         }
       }
     },
@@ -167,6 +236,9 @@
             "loop",
             "stem"
           ]
+        },
+        "tempoPlan": {
+          "$ref": "#/$defs/tempoPlan"
         }
       }
     },
@@ -201,6 +273,7 @@
             "intro_outro_blend",
             "build_to_drop_swap",
             "drop_end_reverb_exit",
+            "wash_out",
             "drop_double",
             "loop_tighten",
             "vocal_over_instrumental",
@@ -248,6 +321,9 @@
           "additionalProperties": {
             "$ref": "#/$defs/transitionAnchor"
           }
+        },
+        "tempoPlan": {
+          "$ref": "#/$defs/tempoPlan"
         }
       }
     },

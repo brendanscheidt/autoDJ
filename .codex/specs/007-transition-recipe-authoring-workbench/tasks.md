@@ -60,4 +60,14 @@
   - Load two real analyzed songs, design a small automation move, preview it,
     export session/MixPlan/recipe, and ask the user to audition.
   - Record verdict before expanding transition families.
+  - Deferred, 2026-05-27:
+    - User rejected the native/HTML recipe-workbench authoring path for now in
+      favor of Rekordbox-labeled semantic cues, concrete JSON MixPlans, and
+      generated full-set auditions.
+    - Keep this unchecked. The implementation remains a developer prototype,
+      but it is not the current product workflow and should not gate the next
+      transition-planning work.
+    - If recipe authoring returns later, restart acceptance from the current
+      native workbench state and compare it against the Rekordbox/manual
+      workflow before adding more UI features.
   - _Requirements: 8.4_

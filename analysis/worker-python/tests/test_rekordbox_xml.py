@@ -5,6 +5,8 @@ from pathlib import Path
 
 from autodj_analysis import (
     apply_rekordbox_overrides,
+    apply_rekordbox_semantic_overrides,
+    apply_rekordbox_semantic_xml_file,
     apply_rekordbox_xml_file,
     build_rekordbox_xml_from_analyzed_track,
     export_analyzed_track_to_rekordbox_xml_file,
@@ -20,6 +22,7 @@ def test_load_rekordbox_track_parses_tempo_and_position_marks(tmp_path: Path) ->
 
     assert track.name == "Example Track"
     assert track.average_bpm == 150.0
+    assert track.tonality == "9A"
     assert track.tempos[0].start_seconds == 0.098
     assert track.tempos[0].bpm == 150.0
     assert [cue.start_seconds for cue in track.cues] == [51.298, 76.898, 128.098, 179.298]
@@ -28,8 +31,10 @@ def test_load_rekordbox_track_parses_tempo_and_position_marks(tmp_path: Path) ->
 
 def test_apply_rekordbox_overrides_replaces_tempo_grid_sections_and_cues(tmp_path: Path) -> None:
     track = load_rekordbox_track(_write_rekordbox_xml(tmp_path))
+    analyzed = _analyzed_artifact()
+    analyzed["key"] = {"tonic": "unknown", "mode": "unknown", "confidence": 0.0, "candidates": []}
 
-    artifact = apply_rekordbox_overrides(_analyzed_artifact(), track)
+    artifact = apply_rekordbox_overrides(analyzed, track)
 
     assert artifact["tempo"]["bpm"] == 150.0
     assert artifact["tempo"]["normalizedBpm"] == 150.0
@@ -67,6 +72,7 @@ def test_apply_rekordbox_overrides_replaces_tempo_grid_sections_and_cues(tmp_pat
     assert [cue["type"] for cue in artifact["cuePoints"]] == ["drop", "mix_out", "drop", "mix_out"]
     assert [cue["beatIndex"] for cue in artifact["cuePoints"]] == [128, 192, 320, 448]
     assert artifact["cuePoints"][0]["tags"] == ["rekordbox_xml", "hot_cue_A"]
+    assert artifact["key"] == analyzed["key"]
     assert artifact["quality"]["overallConfidence"] == 0.95
     assert "Rekordbox XML" in artifact["quality"]["warnings"][0]
 
@@ -82,6 +88,56 @@ def test_apply_rekordbox_xml_file_writes_overridden_artifact(tmp_path: Path) -> 
     assert written_path == output_path
     assert payload["tempo"]["bpm"] == 150.0
     assert payload["cuePoints"][2]["timeSeconds"] == 128.098
+
+
+def test_apply_rekordbox_semantic_overrides_preserves_autodj_tempo_grid_and_key(tmp_path: Path) -> None:
+    track = load_rekordbox_track(_write_named_rekordbox_xml(tmp_path))
+    analyzed = _analyzed_artifact()
+    analyzed["key"] = {"camelot": "7A", "confidence": 0.91}
+    analyzed["beatGrid"] = {
+        "beats": [
+            {"index": 41, "timeSeconds": 32.0, "confidence": 0.9},
+            {"index": 77, "timeSeconds": 48.1, "confidence": 0.9},
+            {"index": 145, "timeSeconds": 80.0, "confidence": 0.9},
+        ],
+        "downbeats": [],
+        "confidence": 0.73,
+    }
+
+    artifact = apply_rekordbox_semantic_overrides(analyzed, track)
+
+    assert artifact["tempo"] == analyzed["tempo"]
+    assert artifact["beatGrid"] == analyzed["beatGrid"]
+    assert artifact["key"] == analyzed["key"]
+    assert [section["type"] for section in artifact["sections"]] == ["intro", "build", "drop", "break"]
+    assert artifact["sections"][2]["startBeatIndex"] == 77
+    assert artifact["cuePoints"][2]["beatIndex"] == 77
+    assert "rekordboxSemanticXml" in artifact["source"]["providerMetadata"]
+    assert "rekordboxXml" not in artifact["source"]["providerMetadata"]
+
+
+def test_apply_rekordbox_semantic_xml_file_writes_semantic_only_artifact(tmp_path: Path) -> None:
+    analyzed_path = tmp_path / "analyzed-track.json"
+    analyzed = _analyzed_artifact()
+    analyzed["beatGrid"] = {
+        "beats": [{"index": 77, "timeSeconds": 48.1, "confidence": 0.9}],
+        "downbeats": [],
+        "confidence": 0.73,
+    }
+    analyzed_path.write_text(json.dumps(analyzed), encoding="utf-8")
+    output_path = tmp_path / "semantic-overridden.json"
+
+    written_path = apply_rekordbox_semantic_xml_file(
+        analyzed_path,
+        _write_named_rekordbox_xml(tmp_path),
+        output_path,
+    )
+
+    payload = json.loads(written_path.read_text(encoding="utf-8"))
+    assert written_path == output_path
+    assert payload["tempo"]["candidates"][0]["backend"] == "test"
+    assert payload["cuePoints"][2]["timeSeconds"] == 48.098
+    assert payload["cuePoints"][2]["beatIndex"] == 77
 
 
 def test_parse_semantic_cue_label_supports_named_boundaries() -> None:
@@ -209,7 +265,7 @@ def _write_rekordbox_xml(tmp_path: Path) -> Path:
         """<?xml version="1.0" encoding="UTF-8"?>
 <DJ_PLAYLISTS Version="1.0.0">
   <COLLECTION Entries="1">
-    <TRACK Name="Example Track" AverageBpm="150.00" Location="file://localhost/example.mp3">
+    <TRACK Name="Example Track" AverageBpm="150.00" Tonality="9A" Location="file://localhost/example.mp3">
       <TEMPO Inizio="0.098" Bpm="150.00" Metro="4/4" Battito="1"/>
       <POSITION_MARK Name="" Type="0" Start="51.298" Num="0" Red="255" Green="55" Blue="111"/>
       <POSITION_MARK Name="" Type="0" Start="76.898" Num="1" Red="69" Green="172" Blue="219"/>
@@ -230,7 +286,7 @@ def _write_named_rekordbox_xml(tmp_path: Path) -> Path:
         """<?xml version="1.0" encoding="UTF-8"?>
 <DJ_PLAYLISTS Version="1.0.0">
   <COLLECTION Entries="1">
-    <TRACK Name="Example Track" AverageBpm="150.00" Location="file://localhost/example.mp3">
+    <TRACK Name="Example Track" AverageBpm="150.00" Tonality="9A" Location="file://localhost/example.mp3">
       <TEMPO Inizio="0.098" Bpm="150.00" Metro="4/4" Battito="1"/>
       <POSITION_MARK Name="intro_1_start" Type="0" Start="0.098" Num="0" Red="90" Green="160" Blue="255"/>
       <POSITION_MARK Name="build_1_start" Type="0" Start="32.098" Num="1" Red="255" Green="194" Blue="66"/>

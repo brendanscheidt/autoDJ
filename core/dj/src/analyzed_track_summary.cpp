@@ -629,6 +629,30 @@ private:
     };
 }
 
+[[nodiscard]] std::optional<AnalyzedKey> parseKeySummary(const JsonValue& value, std::string& errorMessage) {
+    if (value.type != JsonValue::Type::Object) {
+        errorMessage = "Key analysis must be an object";
+        return std::nullopt;
+    }
+
+    AnalyzedKey key;
+    key.tonic = optionalString(value.objectValue, "tonic");
+    key.mode = optionalString(value.objectValue, "mode");
+    key.camelot = optionalString(value.objectValue, "camelot");
+    auto confidence = optionalConfidence(value.objectValue, "confidence", errorMessage);
+    if (!confidence.has_value() && !errorMessage.empty()) {
+        return std::nullopt;
+    }
+    key.confidence = confidence.value_or(0.0);
+
+    if (const auto* provenance = field(value.objectValue, "provenance", JsonValue::Type::Object); provenance != nullptr) {
+        key.backendName = optionalString(provenance->objectValue, "backendName");
+        key.modelName = optionalString(provenance->objectValue, "modelName");
+    }
+
+    return key;
+}
+
 void addReaderWarning(TrackAnalysisSummaryReadResult& result,
                       TrackAnalysisSummary& summary,
                       std::string code,
@@ -657,6 +681,12 @@ void addConfidenceRiskFlags(TrackAnalysisSummary& summary) {
         addRiskFlag(summary, "low_beat_grid_confidence");
     } else if (summary.beatGridConfidence > 0.0 && summary.beatGridConfidence < complexTransitionThreshold) {
         addRiskFlag(summary, "medium_beat_grid_confidence");
+    }
+
+    if (!summary.key.known()) {
+        addRiskFlag(summary, "missing_key");
+    } else if (summary.key.confidence < simpleTransitionThreshold) {
+        addRiskFlag(summary, "low_key_confidence");
     }
 
     if (summary.overallConfidence > 0.0 && summary.overallConfidence < simpleTransitionThreshold) {
@@ -736,6 +766,16 @@ TrackAnalysisSummaryReadResult parseTrackAnalysisSummary(std::string_view json, 
         summary.tempoConfidence = tempoConfidence.value();
     } else {
         addReaderWarning(result, summary, "missing_tempo_confidence", "Tempo confidence is missing");
+    }
+
+    if (const auto* key = field(root->objectValue, "key", JsonValue::Type::Object); key != nullptr) {
+        auto parsedKey = parseKeySummary(*key, errorMessage);
+        if (!parsedKey.has_value()) {
+            return errorResult("invalid_artifact", errorMessage);
+        }
+        summary.key = std::move(parsedKey.value());
+    } else {
+        addReaderWarning(result, summary, "missing_key_analysis", "AnalyzedTrack artifact did not include key metadata");
     }
 
     const auto* beatGrid = field(root->objectValue, "beatGrid", JsonValue::Type::Object);

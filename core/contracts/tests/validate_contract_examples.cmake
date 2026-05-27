@@ -173,7 +173,7 @@ require_array_min_length("${mix_plan}" "mix plan tracks" 1 tracks)
 require_array_min_length("${mix_plan}" "mix plan transitions" 1 transitions)
 require_array_min_length("${mix_plan}" "mix plan commands" 1 commands)
 require_array_object_field_value("${mix_plan}" "mix plan transitions" technique "build_to_drop_swap" transitions)
-require_array_object_field_value("${mix_plan}" "mix plan transitions" technique "drop_end_reverb_exit" transitions)
+require_array_object_field_value("${mix_plan}" "mix plan transitions" technique "wash_out" transitions)
 require_array_object_field_value("${mix_plan}" "mix plan commands" control "reverbTailGain" commands)
 require_no_real_audio_paths("${mix_plan_example}")
 

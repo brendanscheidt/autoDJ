@@ -23,9 +23,15 @@ struct DropSwitchTemplateOptions final {
     double outgoingSilentMeasuresBeforeDrop{1.0};
     double minimumSectionConfidence{0.65};
     double complexTransitionConfidence{0.85};
+    std::optional<double> incomingTargetBpm;
+    std::string tempoBackend{"soundstretch"};
+    std::string tempoBackendVersion{"2.3.2"};
+    std::string tempoQuality{"standard"};
+    bool requiresRenderedBpmValidation{true};
 };
 
 struct DropSwitchTemplatePlanFragment final {
+    std::vector<playback::TrackAssetReference> assets;
     std::vector<playback::TrackPlacement> placements;
     playback::TransitionEdge transition;
     std::vector<playback::DeckCommand> commands;

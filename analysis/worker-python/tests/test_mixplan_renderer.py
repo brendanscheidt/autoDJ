@@ -7,6 +7,7 @@ import wave
 
 import pytest
 
+import autodj_analysis.mixplan_renderer as mixplan_renderer
 from autodj_analysis.mixplan_renderer import MixPlanRenderError, RenderOptions, render_mix_plan_file
 
 
@@ -100,8 +101,8 @@ def _drop_end_reverb_plan(tmp_path: Path) -> Path:
                 "transitionId": "transition-render-test",
                 "fromPlacementId": "place-outgoing",
                 "toPlacementId": "place-incoming",
-                "technique": "drop_end_reverb_exit",
-                "templateId": "drop_end_reverb_exit_v1",
+                "technique": "wash_out",
+                "templateId": "drop_end_wash_out_v1",
                 "timelineStartSeconds": 0.5,
                 "timelineEndSeconds": 1.4,
                 "handoffTimelineSeconds": 1.0,
@@ -120,6 +121,15 @@ def _drop_end_reverb_plan(tmp_path: Path) -> Path:
                 "keyframes": [
                     {"at": 0.5, "value": 1.0, "interpolation": "hold"},
                     {"at": 1.0, "value": 0.0, "interpolation": "linear"},
+                ],
+            },
+            {
+                "type": "automate",
+                "deck": 1,
+                "control": "eqHigh",
+                "keyframes": [
+                    {"at": 0.5, "value": 1.0, "interpolation": "hold"},
+                    {"at": 1.0, "value": 0.62, "interpolation": "linear"},
                 ],
             },
             {
@@ -186,8 +196,8 @@ def test_render_mix_plan_writes_wav_summary_and_trace(tmp_path: Path) -> None:
     assert result.summary_path.exists()
     assert result.trace_path.exists()
     assert result.sample_rate == sample_rate
-    assert result.transition_templates == ("drop_end_reverb_exit_v1",)
-    assert {"eqLow", "reverbTailGain", "reverbWet", "volume"}.issubset(result.automation_controls)
+    assert result.transition_templates == ("drop_end_wash_out_v1",)
+    assert {"eqHigh", "eqLow", "reverbTailGain", "reverbWet", "volume"}.issubset(result.automation_controls)
 
     wav_sample_rate, samples = _read_wav_samples(result.output_wav)
     assert wav_sample_rate == sample_rate
@@ -261,6 +271,162 @@ def test_render_mix_plan_rejects_missing_assets(tmp_path: Path) -> None:
         render_mix_plan_file(plan_path, tmp_path / "render", RenderOptions(sample_rate=8_000, asset_root=tmp_path))
 
     assert exc_info.value.code == "missing_asset"
+
+
+def test_render_mix_plan_applies_constant_tempo_plan_before_existing_automation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sample_rate = 8_000
+    source = [0.0] * sample_rate
+    source[round(0.25 * sample_rate)] = 1.0
+    stretched = [0.0] * (sample_rate * 2)
+    stretched[round(0.50 * sample_rate)] = 1.0
+    _write_wav(tmp_path / "incoming.wav", source, sample_rate)
+
+    class _FakeStretchResult:
+        output_path: Path
+
+        def __init__(self, output_path: Path) -> None:
+            self.output_path = output_path
+
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "backendName": "soundstretch",
+                "sourceBpm": 100.0,
+                "targetBpm": 50.0,
+                "tempoRatio": 0.5,
+                "outputPath": str(self.output_path),
+            }
+
+    def fake_stretch_audio_file(
+        audio_path: Path,
+        output_wav: Path,
+        *,
+        report_path: Path | None,
+        options: object,
+    ) -> _FakeStretchResult:
+        assert audio_path == tmp_path / "incoming.wav"
+        _write_wav(output_wav, stretched, sample_rate)
+        if report_path is not None:
+            report_path.write_text("{}", encoding="utf-8")
+        return _FakeStretchResult(output_wav)
+
+    monkeypatch.setattr(mixplan_renderer, "stretch_audio_file", fake_stretch_audio_file)
+    plan = {
+        "schemaVersion": "1.0.0",
+        "planId": "plan-tempo-render-test",
+        "createdAtUtc": "2026-01-01T00:00:00Z",
+        "strategy": {"strategyId": "test", "strategyVersion": "1.0.0"},
+        "assets": [
+            {"trackId": "incoming", "sourceUri": "incoming.wav", "formatHint": "wav", "sourceBpm": 100.0},
+        ],
+        "tracks": [
+            {
+                "placementId": "place-incoming",
+                "trackId": "incoming",
+                "deck": 1,
+                "sourceStartSeconds": 0.25,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 0.08,
+                "role": "incoming",
+                "tempoPlan": {
+                    "sourceBpm": 100.0,
+                    "targetBpm": 50.0,
+                    "tempoRatio": 0.5,
+                    "preservePitch": True,
+                    "backend": "soundstretch",
+                    "requiresRenderedBpmValidation": True,
+                },
+            }
+        ],
+        "transitions": [
+            {
+                "transitionId": "transition-test",
+                "fromPlacementId": "place-incoming",
+                "toPlacementId": "place-incoming",
+                "technique": "hard_cut",
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 0.08,
+                "score": 0.5,
+                "reasons": ["tempo render test"],
+            }
+        ],
+        "commands": [
+            {"type": "load", "at": 0.0, "deck": 1, "trackId": "incoming", "cueSeconds": 0.25},
+            {"type": "play", "at": 0.0, "deck": 1},
+        ],
+    }
+    plan_path = tmp_path / "mix-plan-tempo.json"
+    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+    result = render_mix_plan_file(
+        plan_path,
+        tmp_path / "render",
+        RenderOptions(sample_rate=sample_rate, asset_root=tmp_path, output_gain=1.0),
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    wav_sample_rate, samples = _read_wav_samples(result.output_wav)
+    first_window = _peak(samples, wav_sample_rate, 0.0, 0.02)
+    assert first_window > 0.5
+    assert summary["tempoStretchReports"][0]["trackId"] == "incoming"
+    assert summary["tempoStretchReports"][0]["requiresRenderedBpmValidation"] is True
+
+
+def test_render_mix_plan_rejects_dynamic_tempo_ramps_until_supported(tmp_path: Path) -> None:
+    sample_rate = 8_000
+    _sine_fixture(tmp_path / "incoming.wav", frequency_hz=100.0, duration_seconds=0.5, sample_rate=sample_rate, amplitude=0.5)
+    plan = {
+        "schemaVersion": "1.0.0",
+        "planId": "plan-tempo-ramp-test",
+        "createdAtUtc": "2026-01-01T00:00:00Z",
+        "strategy": {"strategyId": "test", "strategyVersion": "1.0.0"},
+        "assets": [{"trackId": "incoming", "sourceUri": "incoming.wav", "formatHint": "wav"}],
+        "tracks": [
+            {
+                "placementId": "place-incoming",
+                "trackId": "incoming",
+                "deck": 1,
+                "sourceStartSeconds": 0.0,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 0.4,
+            }
+        ],
+        "transitions": [
+            {
+                "transitionId": "transition-test",
+                "fromPlacementId": "place-incoming",
+                "toPlacementId": "place-incoming",
+                "technique": "hard_cut",
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 0.4,
+                "score": 0.5,
+                "reasons": ["tempo ramp test"],
+            }
+        ],
+        "commands": [
+            {"type": "load", "at": 0.0, "deck": 1, "trackId": "incoming", "cueSeconds": 0.0},
+            {"type": "play", "at": 0.0, "deck": 1},
+            {
+                "type": "automate",
+                "deck": 1,
+                "control": "tempo",
+                "keyframes": [
+                    {"at": 0.0, "value": 1.0, "interpolation": "hold"},
+                    {"at": 0.4, "value": 1.1, "interpolation": "linear"},
+                ],
+            },
+        ],
+    }
+    plan_path = tmp_path / "mix-plan-ramp.json"
+    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+    with pytest.raises(MixPlanRenderError) as exc_info:
+        render_mix_plan_file(plan_path, tmp_path / "render", RenderOptions(sample_rate=sample_rate, asset_root=tmp_path))
+
+    assert exc_info.value.code == "tempo_ramp_unsupported"
 
 
 def test_render_mix_plan_renders_echo_wet_delay_return(tmp_path: Path) -> None:

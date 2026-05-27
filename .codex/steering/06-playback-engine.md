@@ -139,15 +139,29 @@ mobile assumption.
 
 ## Beat Sync And Tempo
 
-The MVP can start with conservative tempo behavior:
+The first MVP behavior required exact normalized BPM equality for second-build
+drop switches. Spec 009 expands this with pitch-preserving tempo control:
 
-- Require exact normalized BPM equality for second-build drop switches.
-- Prefer simple reverb/hard-cut exits when normalized BPM differs.
-- Avoid aggressive stretching until a proper backend is integrated.
-- Store desired deck `tempo` automation in the plan even if the backend is
-  initially limited.
+- Engine/manual MixPlans can request target BPM or tempo ratio changes while
+  preserving pitch.
+- The automatic planner gates candidates with a configurable BPM window rather
+  than an engine-level hard cap.
+- Current POC generated auditions use one-sided incoming SoundStretch matching:
+  an incoming deck may be rendered to the outgoing deck's BPM when the delta is
+  inside the configured gate. Default gate: `10 BPM`.
+- Midpoint bridge planning, where both decks move toward a shared middle BPM,
+  remains deferred because dynamic tempo ramps are not yet accepted by the
+  offline renderer.
+- Prefer simple reverb/hard-cut exits when tempo matching is unavailable or
+  quality diagnostics are poor.
+- Store desired deck `tempo` automation and preserve-pitch intent in the plan.
 
-Time-stretching should be behind an interface so the backend can be swapped.
+Time-stretching stays behind an interface so the backend can be swapped.
+SoundStretch is the accepted POC backend after manual auditions; Rubber Band is
+kept as an experimental comparison because it reduced perceived loudness and
+bass fullness in the tested dubstep material. The offline renderer is allowed
+to prove quality first; native realtime integration can follow after the
+selected backend is accepted by audition.
 
 ## Looping
 

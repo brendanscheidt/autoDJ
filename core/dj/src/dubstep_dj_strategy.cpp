@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <iomanip>
 #include <map>
 #include <optional>
@@ -66,7 +67,174 @@ void addCandidateRejection(DubstepPocPlanResult& result,
         .formatHint = inferFormatHint(summary.sourceUri),
         .contentHash = {},
         .durationSeconds = summary.durationSeconds,
+        .sourceBpm = summary.rawBpm.has_value() ? summary.rawBpm : std::optional<double>{summary.normalizedBpm},
+        .normalizedBpm = summary.normalizedBpm,
     };
+}
+
+struct CamelotKey final {
+    int number{0};
+    char letter{'A'};
+};
+
+struct KeyCompatibility final {
+    std::string classification{"unknown"};
+    double score{0.4};
+    std::string reason{"missing_key"};
+};
+
+[[nodiscard]] std::optional<CamelotKey> parseCamelot(const std::string& value) {
+    if (value.size() < 2 || value.size() > 3) {
+        return std::nullopt;
+    }
+    const auto letter = static_cast<char>(std::toupper(static_cast<unsigned char>(value.back())));
+    if (letter != 'A' && letter != 'B') {
+        return std::nullopt;
+    }
+
+    const auto numberText = value.substr(0, value.size() - 1);
+    if (numberText.empty() || numberText.size() > 2) {
+        return std::nullopt;
+    }
+
+    int number = 0;
+    for (const auto character : numberText) {
+        if (!std::isdigit(static_cast<unsigned char>(character))) {
+            return std::nullopt;
+        }
+        number = number * 10 + (character - '0');
+    }
+    if (number < 1 || number > 12) {
+        return std::nullopt;
+    }
+    return CamelotKey{
+        .number = number,
+        .letter = letter,
+    };
+}
+
+[[nodiscard]] bool adjacentCamelotNumbers(const int first, const int second) {
+    return (first % 12) + 1 == second || (second % 12) + 1 == first;
+}
+
+[[nodiscard]] bool hasUsableKey(const TrackAnalysisSummary& summary) {
+    constexpr double minimumKeyConfidence = 0.65;
+    return summary.key.known() && summary.key.confidence >= minimumKeyConfidence;
+}
+
+[[nodiscard]] KeyCompatibility classifyKeyCompatibility(const TrackAnalysisSummary& outgoing,
+                                                        const TrackAnalysisSummary& incoming) {
+    if (!outgoing.key.known() || !incoming.key.known()) {
+        return KeyCompatibility{
+            .classification = "unknown",
+            .score = 0.4,
+            .reason = "missing_key",
+        };
+    }
+    if (!hasUsableKey(outgoing) || !hasUsableKey(incoming)) {
+        return KeyCompatibility{
+            .classification = "unknown",
+            .score = 0.45,
+            .reason = "low_key_confidence",
+        };
+    }
+
+    const auto first = parseCamelot(outgoing.key.camelot);
+    const auto second = parseCamelot(incoming.key.camelot);
+    if (!first.has_value() || !second.has_value()) {
+        return KeyCompatibility{
+            .classification = "unknown",
+            .score = 0.4,
+            .reason = "invalid_camelot_key",
+        };
+    }
+    if (outgoing.key.camelot == incoming.key.camelot) {
+        return KeyCompatibility{
+            .classification = "perfect",
+            .score = 1.0,
+            .reason = "same_camelot_key",
+        };
+    }
+    if (first->number == second->number && first->letter != second->letter) {
+        return KeyCompatibility{
+            .classification = "relative",
+            .score = 0.9,
+            .reason = "same_number_opposite_mode",
+        };
+    }
+    if (first->letter == second->letter && adjacentCamelotNumbers(first->number, second->number)) {
+        return KeyCompatibility{
+            .classification = "adjacent",
+            .score = 0.8,
+            .reason = "neighboring_camelot_number_same_mode",
+        };
+    }
+    return KeyCompatibility{
+        .classification = "clash",
+        .score = 0.0,
+        .reason = "distant_camelot_key",
+    };
+}
+
+[[nodiscard]] std::string keySummary(const TrackAnalysisSummary& summary) {
+    if (!summary.key.known()) {
+        return "unknown";
+    }
+    std::ostringstream output;
+    output << summary.key.camelot << " confidence=" << summary.key.confidence;
+    if (!summary.key.backendName.empty()) {
+        output << " backend=" << summary.key.backendName;
+    }
+    return output.str();
+}
+
+void addUniqueRiskFlag(playback::TransitionEdge& transition, std::string flag) {
+    if (std::find(transition.riskFlags.begin(), transition.riskFlags.end(), flag) == transition.riskFlags.end()) {
+        transition.riskFlags.push_back(std::move(flag));
+    }
+}
+
+void applyKeyCompatibility(playback::TransitionEdge& transition,
+                           const TrackAnalysisSummary& outgoing,
+                           const TrackAnalysisSummary& incoming,
+                           const bool complexBlend) {
+    const auto compatibility = classifyKeyCompatibility(outgoing, incoming);
+    transition.reasons.push_back("Camelot compatibility: " + compatibility.classification + " ("
+                                 + compatibility.reason + "; outgoing=" + keySummary(outgoing)
+                                 + ", incoming=" + keySummary(incoming) + ")");
+
+    if (compatibility.classification == "clash") {
+        addUniqueRiskFlag(transition, complexBlend ? "camelot_key_clash_downranked" : "camelot_key_clash_warning");
+        if (complexBlend) {
+            transition.score = std::min(transition.score, 0.58);
+        }
+        return;
+    }
+    if (compatibility.classification == "unknown") {
+        addUniqueRiskFlag(transition, "key_compatibility_unknown");
+        if (complexBlend) {
+            transition.score = std::min(transition.score, 0.72);
+        }
+        return;
+    }
+
+    transition.score = std::min(1.0, transition.score + compatibility.score * 0.04);
+}
+
+[[nodiscard]] DropSwitchTemplatePlanFragment withKeyCompatibility(
+    DropSwitchTemplatePlanFragment fragment,
+    const TrackAnalysisSummary& outgoing,
+    const TrackAnalysisSummary& incoming) {
+    applyKeyCompatibility(fragment.transition, outgoing, incoming, true);
+    return fragment;
+}
+
+[[nodiscard]] DropEndReverbExitPlanFragment withKeyCompatibility(
+    DropEndReverbExitPlanFragment fragment,
+    const TrackAnalysisSummary& outgoing,
+    const TrackAnalysisSummary& incoming) {
+    applyKeyCompatibility(fragment.transition, outgoing, incoming, false);
+    return fragment;
 }
 
 template <typename Fragment>
@@ -87,6 +255,7 @@ template <typename Fragment>
         makeAsset(outgoing),
         makeAsset(incoming),
     };
+    plan.assets.insert(plan.assets.end(), fragment.assets.begin(), fragment.assets.end());
     plan.tracks = fragment.placements;
     plan.transitions = {fragment.transition};
     plan.commands = fragment.commands;
@@ -110,11 +279,11 @@ void chooseDropSwitch(DubstepPocPlanResult& result,
     result.nextOutgoingTrackId = incoming.trackId;
     result.selectedTemplateId = fragment.transition.templateId;
     result.nextOutgoingDeck = 2;
-    result.debugNotes.push_back("Selected second-build drop switch for exact-normalized-BPM incoming candidate "
+    result.debugNotes.push_back("Selected second-build drop switch for native or tempo-matched incoming candidate "
                                 + incoming.trackId.value);
 }
 
-void chooseReverbExit(DubstepPocPlanResult& result,
+void chooseWashOut(DubstepPocPlanResult& result,
                       const TrackAnalysisSummary& outgoing,
                       const TrackAnalysisSummary& incoming,
                       const DubstepPocPlanOptions& options,
@@ -124,7 +293,7 @@ void chooseReverbExit(DubstepPocPlanResult& result,
     result.nextOutgoingTrackId = incoming.trackId;
     result.selectedTemplateId = fragment.transition.templateId;
     result.nextOutgoingDeck = 2;
-    result.debugNotes.push_back("Selected drop-end reverb exit fallback for incoming candidate "
+    result.debugNotes.push_back("Selected drop-end wash-out fallback for incoming candidate "
                                 + incoming.trackId.value);
 }
 
@@ -208,6 +377,78 @@ void writeStringArray(std::ostringstream& output, const std::vector<std::string>
     output << "]";
 }
 
+void writeTempoPlan(std::ostringstream& output, const playback::TempoPlan& tempoPlan, const int indent) {
+    const auto spaces = std::string(indent, ' ');
+    output << "{\n";
+    auto wroteField = false;
+    const auto comma = [&]() {
+        if (wroteField) {
+            output << ",\n";
+        }
+        wroteField = true;
+        output << spaces << "  ";
+    };
+    if (tempoPlan.sourceBpm.has_value()) {
+        comma();
+        output << "\"sourceBpm\": " << jsonNumber(tempoPlan.sourceBpm.value());
+    }
+    if (tempoPlan.targetBpm.has_value()) {
+        comma();
+        output << "\"targetBpm\": " << jsonNumber(tempoPlan.targetBpm.value());
+    }
+    if (tempoPlan.tempoRatio.has_value()) {
+        comma();
+        output << "\"tempoRatio\": " << jsonNumber(tempoPlan.tempoRatio.value());
+    }
+    if (tempoPlan.preservePitch.has_value()) {
+        comma();
+        output << "\"preservePitch\": " << (tempoPlan.preservePitch.value() ? "true" : "false");
+    }
+    if (!tempoPlan.backend.empty()) {
+        comma();
+        output << "\"backend\": " << jsonString(tempoPlan.backend);
+    }
+    if (!tempoPlan.backendVersion.empty()) {
+        comma();
+        output << "\"backendVersion\": " << jsonString(tempoPlan.backendVersion);
+    }
+    if (!tempoPlan.quality.empty()) {
+        comma();
+        output << "\"quality\": " << jsonString(tempoPlan.quality);
+    }
+    if (!tempoPlan.renderedSourceUri.empty()) {
+        comma();
+        output << "\"renderedSourceUri\": " << jsonString(tempoPlan.renderedSourceUri);
+    }
+    if (!tempoPlan.renderedContentHash.empty()) {
+        comma();
+        output << "\"renderedContentHash\": " << jsonString(tempoPlan.renderedContentHash);
+    }
+    if (tempoPlan.targetBpmBias.has_value()) {
+        comma();
+        output << "\"targetBpmBias\": " << jsonNumber(tempoPlan.targetBpmBias.value());
+    }
+    if (tempoPlan.validatedBpm.has_value()) {
+        comma();
+        output << "\"validatedBpm\": " << jsonNumber(tempoPlan.validatedBpm.value());
+    }
+    if (!tempoPlan.validationStatus.empty()) {
+        comma();
+        output << "\"validationStatus\": " << jsonString(tempoPlan.validationStatus);
+    }
+    if (tempoPlan.requiresRenderedBpmValidation.has_value()) {
+        comma();
+        output << "\"requiresRenderedBpmValidation\": "
+               << (tempoPlan.requiresRenderedBpmValidation.value() ? "true" : "false");
+    }
+    if (!tempoPlan.warnings.empty()) {
+        comma();
+        output << "\"warnings\": ";
+        writeStringArray(output, tempoPlan.warnings, indent + 4);
+    }
+    output << "\n" << spaces << "}";
+}
+
 void writeAssets(std::ostringstream& output, const std::vector<playback::TrackAssetReference>& assets) {
     output << "  \"assets\": [\n";
     for (std::size_t index = 0; index < assets.size(); ++index) {
@@ -218,10 +459,15 @@ void writeAssets(std::ostringstream& output, const std::vector<playback::TrackAs
         output << "      \"formatHint\": " << jsonString(asset.formatHint) << ",\n";
         output << "      \"contentHash\": " << jsonString(asset.contentHash);
         if (asset.durationSeconds.has_value()) {
-            output << ",\n      \"durationSeconds\": " << jsonNumber(asset.durationSeconds.value()) << "\n";
-        } else {
-            output << "\n";
+            output << ",\n      \"durationSeconds\": " << jsonNumber(asset.durationSeconds.value());
         }
+        if (asset.sourceBpm.has_value()) {
+            output << ",\n      \"sourceBpm\": " << jsonNumber(asset.sourceBpm.value());
+        }
+        if (asset.normalizedBpm.has_value()) {
+            output << ",\n      \"normalizedBpm\": " << jsonNumber(asset.normalizedBpm.value());
+        }
+        output << "\n";
         output << "    }";
         if (index + 1 < assets.size()) {
             output << ",";
@@ -247,7 +493,12 @@ void writePlacements(std::ostringstream& output, const std::vector<playback::Tra
         if (placement.timelineEndSeconds.has_value()) {
             output << ",\n      \"timelineEndSeconds\": " << jsonNumber(placement.timelineEndSeconds.value());
         }
-        output << ",\n      \"role\": " << jsonString(placement.role) << "\n";
+        output << ",\n      \"role\": " << jsonString(placement.role);
+        if (placement.tempoPlan.has_value()) {
+            output << ",\n      \"tempoPlan\": ";
+            writeTempoPlan(output, placement.tempoPlan.value(), 6);
+        }
+        output << "\n";
         output << "    }";
         if (index + 1 < placements.size()) {
             output << ",";
@@ -318,7 +569,12 @@ void writeTransitions(std::ostringstream& output, const std::vector<playback::Tr
             }
             output << "\n";
         }
-        output << "      }\n";
+        output << "      }";
+        if (transition.tempoPlan.has_value()) {
+            output << ",\n      \"tempoPlan\": ";
+            writeTempoPlan(output, transition.tempoPlan.value(), 6);
+        }
+        output << "\n";
         output << "    }";
         if (index + 1 < transitions.size()) {
             output << ",";
@@ -471,6 +727,9 @@ DubstepPocPlanResult DubstepDJStrategy::generatePocPlan(
         return result;
     }
 
+    std::optional<DropSwitchTemplatePlanFragment> selectedDropSwitch;
+    const TrackAnalysisSummary* selectedDropSwitchIncoming = nullptr;
+
     for (const auto& incoming : incomingCandidates) {
         if (incoming.trackId.empty()) {
             addCandidateRejection(result,
@@ -486,27 +745,70 @@ DubstepPocPlanResult DubstepDJStrategy::generatePocPlan(
                                   incoming.trackId);
             continue;
         }
+        DropSwitchTemplateOptions dropSwitchOptions;
         if (outgoing.normalizedBpm != incoming.normalizedBpm) {
-            addCandidateRejection(result,
-                                  "bpm_mismatch_for_drop_switch",
-                                  "Second-build drop switch requires exact normalized BPM equality",
-                                  incoming.trackId);
-            continue;
+            if (!options.allowTempoStretch) {
+                addCandidateRejection(result,
+                                      "bpm_mismatch_for_drop_switch",
+                                      "Second-build drop switch requires exact normalized BPM equality",
+                                      incoming.trackId);
+                continue;
+            }
+            if (outgoing.normalizedBpm <= 0.0 || incoming.normalizedBpm <= 0.0
+                || !std::isfinite(outgoing.normalizedBpm) || !std::isfinite(incoming.normalizedBpm)) {
+                addCandidateRejection(result,
+                                      "invalid_bpm_for_tempo_stretch",
+                                      "Tempo-stretched drop switch requires positive finite BPM values",
+                                      incoming.trackId);
+                continue;
+            }
+            const auto incomingAdjustment = std::fabs(incoming.normalizedBpm - outgoing.normalizedBpm);
+            if (incomingAdjustment > options.maxTempoAdjustmentBpmPerDeck) {
+                addCandidateRejection(result,
+                                      "tempo_adjustment_over_gate",
+                                      "Incoming BPM is outside maxTempoAdjustmentBpmPerDeck for one-sided stretch",
+                                      incoming.trackId);
+                continue;
+            }
+            dropSwitchOptions.incomingTargetBpm = outgoing.normalizedBpm;
+            dropSwitchOptions.tempoBackend = options.tempoBackend;
+            dropSwitchOptions.tempoBackendVersion = options.tempoBackendVersion;
+            dropSwitchOptions.tempoQuality = options.tempoQuality;
+            dropSwitchOptions.requiresRenderedBpmValidation = options.requiresRenderedBpmValidation;
         }
 
-        const auto candidate = buildSecondBuildDropSwitchTemplate(outgoing, incoming);
+        const auto candidate = buildSecondBuildDropSwitchTemplate(outgoing, incoming, dropSwitchOptions);
         if (candidate.ok()) {
-            chooseDropSwitch(result, outgoing, incoming, options, candidate.fragment.value());
-            return result;
+            auto adjusted = withKeyCompatibility(candidate.fragment.value(), outgoing, incoming);
+            if (std::find(adjusted.transition.riskFlags.begin(),
+                          adjusted.transition.riskFlags.end(),
+                          "camelot_key_clash_downranked")
+                != adjusted.transition.riskFlags.end()) {
+                addCandidateRejection(result,
+                                      "camelot_key_clash_for_drop_switch",
+                                      "Second-build drop switch requires a compatible Camelot key when both keys are confident",
+                                      incoming.trackId);
+                continue;
+            }
+            if (!selectedDropSwitch.has_value()
+                || adjusted.transition.score > selectedDropSwitch->transition.score) {
+                selectedDropSwitch = std::move(adjusted);
+                selectedDropSwitchIncoming = &incoming;
+            }
+            continue;
         }
 
         for (const auto& rejection : candidate.rejectionReasons) {
             addCandidateRejection(result, rejection.code, rejection.message, incoming.trackId);
         }
     }
+    if (selectedDropSwitch.has_value() && selectedDropSwitchIncoming != nullptr) {
+        chooseDropSwitch(result, outgoing, *selectedDropSwitchIncoming, options, selectedDropSwitch.value());
+        return result;
+    }
 
     result.debugNotes.push_back(
-        "No exact-normalized-BPM second-build drop switch candidate was selected; trying drop-end reverb exit");
+        "No exact-normalized-BPM second-build drop switch candidate was selected; trying drop-end wash-out");
     for (const auto& incoming : incomingCandidates) {
         if (incoming.trackId.empty() || sameTrack(outgoing, incoming)) {
             continue;
@@ -516,7 +818,7 @@ DubstepPocPlanResult DubstepDJStrategy::generatePocPlan(
         reverbOptions.allowSecondBuildDropPair = true;
         const auto candidate = buildDropEndReverbExitTemplate(outgoing, incoming, reverbOptions);
         if (candidate.ok()) {
-            chooseReverbExit(result, outgoing, incoming, options, candidate.fragment.value());
+            chooseWashOut(result, outgoing, incoming, options, withKeyCompatibility(candidate.fragment.value(), outgoing, incoming));
             return result;
         }
 
@@ -527,7 +829,7 @@ DubstepPocPlanResult DubstepDJStrategy::generatePocPlan(
 
     addError(result,
              "no_valid_transition_template",
-             "No candidate could satisfy the second-build drop switch or drop-end reverb exit templates");
+             "No candidate could satisfy the second-build drop switch or drop-end wash-out templates");
     return result;
 }
 

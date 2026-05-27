@@ -164,6 +164,32 @@ class TempoCandidate:
 
 
 @dataclass(frozen=True)
+class KeyCandidate:
+    tonic: str
+    mode: str
+    confidence: float
+    camelot: str | None = None
+    backend: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.tonic:
+            raise ValueError("tonic must not be empty")
+        if not self.mode:
+            raise ValueError("mode must not be empty")
+        _validate_confidence(self.confidence)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "tonic": self.tonic,
+            "mode": self.mode,
+            "confidence": self.confidence,
+        }
+        _set_if_present(payload, "camelot", self.camelot)
+        _set_if_present(payload, "backend", self.backend)
+        return payload
+
+
+@dataclass(frozen=True)
 class BeatMarker:
     index: int
     time_seconds: float
@@ -274,6 +300,40 @@ class TempoCandidateResult:
 
 
 @dataclass(frozen=True)
+class KeyCandidateResult:
+    status: CandidateStatus
+    provenance: CandidateProvenance
+    tonic: str | None = None
+    mode: str | None = None
+    camelot: str | None = None
+    confidence: float = 0.0
+    candidates: tuple[KeyCandidate, ...] = ()
+    error: BackendExecutionError | None = None
+
+    def __post_init__(self) -> None:
+        _validate_status(self.status)
+        _validate_confidence(self.confidence)
+        if self.status == "ok" and (not self.tonic or not self.mode):
+            raise ValueError("ok key results require tonic and mode")
+        if self.status != "ok" and self.error is None:
+            raise ValueError("non-ok key results require an error")
+        object.__setattr__(self, "candidates", tuple(self.candidates))
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = _candidate_payload(self.status, self.provenance, self.error)
+        _set_if_present(payload, "tonic", self.tonic)
+        _set_if_present(payload, "mode", self.mode)
+        _set_if_present(payload, "camelot", self.camelot)
+        payload["confidence"] = self.confidence
+        payload["candidates"] = [candidate.to_dict() for candidate in self.candidates]
+        return payload
+
+
+@dataclass(frozen=True)
 class BeatGridCandidateResult:
     status: CandidateStatus
     provenance: CandidateProvenance
@@ -335,6 +395,14 @@ class TempoBackend(Protocol):
     name: str
 
     def analyze_tempo(self, audio: DecodedAudio, context: AnalysisContext) -> TempoCandidateResult:
+        ...
+
+
+@runtime_checkable
+class KeyDetectorBackend(Protocol):
+    name: str
+
+    def analyze_key(self, audio: DecodedAudio, context: AnalysisContext) -> KeyCandidateResult:
         ...
 
 

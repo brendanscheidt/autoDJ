@@ -202,6 +202,37 @@ def test_current_signal_backend_reports_structured_unavailable_tempo_dependency(
     assert result.provenance.backend_name == CURRENT_SIGNAL_BACKEND
 
 
+def test_current_signal_load_track_audio_preserves_canonical_sample_rate() -> None:
+    source_path = Path("canonical.wav")
+    seen = {}
+
+    def audio_loader(audio_path, **kwargs):
+        seen["audio_path"] = Path(audio_path)
+        seen["kwargs"] = kwargs
+        return _decoded_audio(source_path=Path(audio_path))
+
+    track = RepositoryTrack(
+        track_id="track-a",
+        repository_id="local-test-repo",
+        source_uri="track-a.mp3",
+        source_path=source_path,
+        provider_metadata={
+            "autodjAnalysisAudio": {
+                "timelinePolicy": "shared-canonical-pcm",
+                "canonicalPath": str(source_path),
+            }
+        },
+    )
+
+    audio = CurrentSignalBackend(audio_loader=audio_loader).load_track_audio(track)
+
+    assert audio.source_path == source_path
+    assert seen["audio_path"] == source_path
+    assert seen["kwargs"]["target_sample_rate"] is None
+    assert seen["kwargs"]["source_uri"] == "track-a.mp3"
+    assert seen["kwargs"]["track_id"] == "track-a"
+
+
 def test_current_signal_section_backend_uses_tempo_features_from_feature_bundle() -> None:
     seen_tempo_features: list[TempoFeatures | None] = []
 
@@ -286,6 +317,9 @@ def test_track_signal_analyzer_can_use_selected_current_signal_section_backend(m
         def analyze_signal(self, seen_track, seen_identity, seen_created_at_utc):
             calls.append((seen_track, seen_identity, seen_created_at_utc))
             return selected_signal_result
+
+        def load_track_audio(self, seen_track):
+            return _decoded_audio(source_path=seen_track.source_path)
 
         def section_result_from_features(self, features):
             return CurrentSignalBackend().section_result_from_features(features)

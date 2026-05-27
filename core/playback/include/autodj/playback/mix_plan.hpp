@@ -25,6 +25,7 @@ enum class TransitionTechnique {
     IntroOutroBlend,
     BuildToDropSwap,
     DropEndReverbExit,
+    WashOut,
     DropDouble,
     LoopTighten,
     VocalOverInstrumental,
@@ -69,12 +70,31 @@ struct StrategyProvenance final {
     std::string randomSeed;
 };
 
+struct TempoPlan final {
+    std::optional<double> sourceBpm;
+    std::optional<double> targetBpm;
+    std::optional<double> tempoRatio;
+    std::optional<bool> preservePitch;
+    std::string backend;
+    std::string backendVersion;
+    std::string quality;
+    std::string renderedSourceUri;
+    std::string renderedContentHash;
+    std::optional<double> targetBpmBias;
+    std::optional<double> validatedBpm;
+    std::string validationStatus;
+    std::optional<bool> requiresRenderedBpmValidation;
+    std::vector<std::string> warnings;
+};
+
 struct TrackAssetReference final {
     domain::TrackId trackId;
     std::string sourceUri;
     std::string formatHint;
     std::string contentHash;
     std::optional<domain::TrackSeconds> durationSeconds;
+    std::optional<double> sourceBpm;
+    std::optional<double> normalizedBpm;
 };
 
 struct TrackPlacement final {
@@ -86,6 +106,7 @@ struct TrackPlacement final {
     domain::TimelineSeconds timelineStartSeconds{0.0};
     std::optional<domain::TimelineSeconds> timelineEndSeconds;
     std::string role;
+    std::optional<TempoPlan> tempoPlan;
 };
 
 struct TransitionAnchor final {
@@ -112,6 +133,7 @@ struct TransitionEdge final {
     std::optional<domain::TimelineSeconds> alignedDropTimelineSeconds;
     std::optional<domain::TimelineSeconds> handoffTimelineSeconds;
     std::map<std::string, TransitionAnchor> sourceAnchors;
+    std::optional<TempoPlan> tempoPlan;
 };
 
 struct Keyframe final {
@@ -167,4 +189,3 @@ struct MixPlanParseResult final {
 [[nodiscard]] std::string toString(AutomationControl control);
 
 }  // namespace autodj::playback
-

@@ -17,7 +17,22 @@ from .batch import (
     SignalAnalyzer,
     analyze_repository_manifest,
 )
+from .canonical_audio import (
+    CANONICAL_AUDIO_FILENAME,
+    CANONICAL_AUDIO_METADATA_FILENAME,
+    CANONICAL_FALLBACK_SAMPLE_RATE,
+    CANONICAL_TIMELINE_POLICY,
+    CanonicalAudioError,
+    CanonicalAudioOptions,
+    canonicalize_repository_manifest,
+)
 from .debug_waveform import build_debug_waveform_artifact, write_debug_waveform_artifact
+from .beatgrid_phase import (
+    BeatgridPhaseOptions,
+    parse_phase_anchor,
+    refine_beatgrid_phase_file,
+)
+from .drop_wall import DropWallOptions, detect_drop_wall_file
 from .cue_detr import CueDetrOptions, predict_cue_detr_file
 from .drop_anchor_ranker import DropAnchorRankerOptions, rank_drop_anchors_file
 from .edm98 import Edm98Options, predict_edm98_file
@@ -48,13 +63,25 @@ from .evaluation import (
 )
 from .genre import classify_stub
 from .audio_io import load_audio
+from .key_benchmark import (
+    DEFAULT_KEY_ANALYSIS_SAMPLE_RATE,
+    DEFAULT_KEY_CANDIDATES,
+    load_key_benchmark_cases,
+    run_key_benchmark,
+)
 from .manifest import ManifestError
 from .mixplan_energy import GainPlanOptions, gain_plan_drop_switch_file
 from .mixplan_nudge import NudgeOptions, nudge_mix_plan_file
 from .mixplan_renderer import RenderOptions, render_mix_plan_file
 from .probe import ProbeRunner
-from .rekordbox_xml import apply_rekordbox_xml_file
+from .rekordbox_xml import apply_rekordbox_semantic_xml_file, apply_rekordbox_xml_file
 from .rekordbox_xml import export_analyzed_track_to_rekordbox_xml_file
+from .tempo_stretch import (
+    DEFAULT_TEMPO_STRETCH_BACKENDS,
+    TempoStretchOptions,
+    run_tempo_stretch_smoke,
+    stretch_audio_file,
+)
 from .transition_template import parse_transition_template_file
 
 
@@ -124,9 +151,67 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     analyze_batch.add_argument(
+        "--canonical-audio-root",
+        type=Path,
+        help=(
+            "optional canonical PCM cache root from canonicalize-audio; when set, "
+            "signal analysis uses tracks/<track-id>/canonical.wav"
+        ),
+    )
+    analyze_batch.add_argument(
         "--json",
         action="store_true",
         help="print the batch summary as JSON",
+    )
+
+    canonicalize_audio = subparsers.add_parser(
+        "canonicalize-audio",
+        help="decode repository tracks into shared canonical PCM artifacts",
+    )
+    canonicalize_audio.add_argument(
+        "repository_manifest",
+        type=Path,
+        help="repository-manifest.json file produced by the repository scanner",
+    )
+    canonicalize_audio.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="metadata cache root where canonical.wav and canonical-audio.json will be written",
+    )
+    canonicalize_audio.add_argument(
+        "--ffmpeg",
+        default="ffmpeg",
+        help="ffmpeg executable path or name",
+    )
+    canonicalize_audio.add_argument(
+        "--ffprobe",
+        default="ffprobe",
+        help="ffprobe executable path or name",
+    )
+    canonicalize_audio.add_argument(
+        "--force",
+        action="store_true",
+        help="rewrite canonical artifacts even when cache freshness checks pass",
+    )
+    canonicalize_audio.add_argument(
+        "--sample-rate",
+        type=int,
+        help=(
+            "optional target sample rate for canonical WAVs; omit to preserve "
+            "44.1/48 kHz sources and use the fallback for other rates"
+        ),
+    )
+    canonicalize_audio.add_argument(
+        "--fallback-sample-rate",
+        type=int,
+        default=CANONICAL_FALLBACK_SAMPLE_RATE,
+        help="sample rate used when source sample rate is unsupported or unavailable",
+    )
+    canonicalize_audio.add_argument(
+        "--json",
+        action="store_true",
+        help="print the canonicalization summary as JSON",
     )
 
     debug_waveform = subparsers.add_parser(
@@ -194,6 +279,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="print the override summary as JSON",
+    )
+
+    apply_rekordbox_semantics = subparsers.add_parser(
+        "apply-rekordbox-semantics",
+        help="apply only Rekordbox XML semantic cue labels while preserving AutoDJ tempo/grid/key",
+    )
+    apply_rekordbox_semantics.add_argument("analyzed_track", type=Path, help="input analyzed-track.json path")
+    apply_rekordbox_semantics.add_argument("rekordbox_xml", type=Path, help="Rekordbox XML export path")
+    apply_rekordbox_semantics.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="output analyzed-track JSON path with Rekordbox semantic labels",
+    )
+    apply_rekordbox_semantics.add_argument(
+        "--track-name",
+        help="optional Rekordbox TRACK Name to import when the XML has multiple tracks",
+    )
+    apply_rekordbox_semantics.add_argument(
+        "--json",
+        action="store_true",
+        help="print the semantic override summary as JSON",
     )
 
     export_rekordbox = subparsers.add_parser(
@@ -362,6 +469,153 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the benchmark summary as JSON",
     )
 
+    benchmark_keys = subparsers.add_parser(
+        "benchmark-keys",
+        help="run key detector candidates against Rekordbox Tonality truth",
+    )
+    benchmark_keys.add_argument(
+        "rekordbox_xml",
+        type=Path,
+        help="Rekordbox XML export containing one or more TRACK Tonality values",
+    )
+    benchmark_keys.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="output directory for candidate key artifacts and benchmark reports",
+    )
+    benchmark_keys.add_argument(
+        "--candidates",
+        default=",".join(DEFAULT_KEY_CANDIDATES),
+        help="comma-separated key detector candidate names to run",
+    )
+    benchmark_keys.add_argument(
+        "--sample-rate",
+        type=int,
+        default=DEFAULT_KEY_ANALYSIS_SAMPLE_RATE,
+        help="shared decoded audio sample rate for in-process key candidates",
+    )
+    benchmark_keys.add_argument(
+        "--json",
+        action="store_true",
+        help="print the benchmark summary as JSON",
+    )
+
+    tempo_stretch_smoke = subparsers.add_parser(
+        "tempo-stretch-smoke",
+        help="smoke-test pitch-preserving tempo-stretch backends on one audio file",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--audio",
+        required=True,
+        type=Path,
+        help="local MP3/WAV path to stretch",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--source-bpm",
+        required=True,
+        type=float,
+        help="source/native BPM for the input audio",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--target-bpm",
+        required=True,
+        type=float,
+        help="target effective BPM for the stretched output",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="output directory for per-backend WAVs and stretch reports",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--backends",
+        default=",".join(DEFAULT_TEMPO_STRETCH_BACKENDS),
+        help="comma-separated tempo-stretch backends to smoke-test",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--sample-rate",
+        type=int,
+        default=44_100,
+        help="WAV sample rate used for backend inputs and outputs",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--quality",
+        default="fine",
+        choices=("fine", "fine-centre", "fast"),
+        help="backend quality mode where supported",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--target-bpm-bias",
+        type=float,
+        default=0.0,
+        help="optional tiny BPM bias added to the requested target before rendering; 0 disables calibration",
+    )
+    tempo_stretch_smoke.add_argument(
+        "--json",
+        action="store_true",
+        help="print the smoke summary as JSON",
+    )
+
+    stretch_audio = subparsers.add_parser(
+        "stretch-audio",
+        help="render one pitch-preserving tempo-stretched WAV",
+    )
+    stretch_audio.add_argument("audio_path", type=Path, help="local MP3/WAV path to stretch")
+    stretch_audio.add_argument(
+        "--source-bpm",
+        required=True,
+        type=float,
+        help="source/native BPM for the input audio",
+    )
+    stretch_audio.add_argument(
+        "--target-bpm",
+        required=True,
+        type=float,
+        help="target effective BPM for the stretched output",
+    )
+    stretch_audio.add_argument(
+        "--backend",
+        default="rubberband",
+        help="tempo-stretch backend name, e.g. rubberband or soundstretch",
+    )
+    stretch_audio.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="output WAV path",
+    )
+    stretch_audio.add_argument(
+        "--report",
+        required=True,
+        type=Path,
+        help="output JSON report path",
+    )
+    stretch_audio.add_argument(
+        "--sample-rate",
+        type=int,
+        default=44_100,
+        help="WAV sample rate used for backend input and output",
+    )
+    stretch_audio.add_argument(
+        "--quality",
+        default="fine",
+        choices=("fine", "fine-centre", "fast"),
+        help="backend quality mode where supported",
+    )
+    stretch_audio.add_argument(
+        "--target-bpm-bias",
+        type=float,
+        default=0.0,
+        help="optional tiny BPM bias added to the requested target before rendering; 0 disables calibration",
+    )
+    stretch_audio.add_argument(
+        "--json",
+        action="store_true",
+        help="print the stretch report as JSON",
+    )
+
     render_mixplan = subparsers.add_parser(
         "render-mixplan",
         help="render a MixPlan JSON file to a local WAV audition artifact",
@@ -383,6 +637,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=44_100,
         help="rendered WAV sample rate",
+    )
+    render_mixplan.add_argument(
+        "--tempo-backend",
+        default="soundstretch",
+        choices=("soundstretch", "rubberband"),
+        help="default backend for tempoPlan preserve-pitch renders without an explicit backend",
+    )
+    render_mixplan.add_argument(
+        "--tempo-quality",
+        default="standard",
+        help="default quality mode for tempoPlan preserve-pitch renders",
     )
     render_mixplan.add_argument(
         "--json",
@@ -411,6 +676,139 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="print the ranking artifact as JSON",
+    )
+
+    drop_wall_debug = subparsers.add_parser(
+        "drop-wall-debug",
+        help="detect and visualize the sharp drop-wall transient around an approximate drop time",
+    )
+    drop_wall_debug.add_argument("audio_path", type=Path, help="local audio path to inspect")
+    drop_wall_debug.add_argument(
+        "--time",
+        required=True,
+        type=float,
+        help="approximate drop time in source seconds, usually a nearby beatgrid/cue time",
+    )
+    drop_wall_debug.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="output drop-wall-debug JSON path",
+    )
+    drop_wall_debug.add_argument(
+        "--svg",
+        type=Path,
+        help="optional output SVG path for visual inspection",
+    )
+    drop_wall_debug.add_argument(
+        "--track-id",
+        help="optional track id to store in the artifact; defaults to the audio filename stem",
+    )
+    drop_wall_debug.add_argument(
+        "--sample-rate",
+        type=int,
+        default=44_100,
+        help="analysis sample rate",
+    )
+    drop_wall_debug.add_argument(
+        "--search-window-ms",
+        type=float,
+        default=450.0,
+        help="search window on each side of --time in milliseconds",
+    )
+    drop_wall_debug.add_argument(
+        "--preferred-window-ms",
+        type=float,
+        default=120.0,
+        help="preferred candidate window around --time in milliseconds",
+    )
+    drop_wall_debug.add_argument(
+        "--preferred-score-ratio",
+        type=float,
+        default=0.60,
+        help="minimum score ratio for a near candidate to beat a farther wall",
+    )
+    drop_wall_debug.add_argument(
+        "--json",
+        action="store_true",
+        help="print the selected wall summary as JSON",
+    )
+
+    refine_beatgrid_phase = subparsers.add_parser(
+        "refine-beatgrid-phase",
+        help="shift a whole beatgrid by consensus drop-wall phase correction",
+    )
+    refine_beatgrid_phase.add_argument("analyzed_track", type=Path, help="input analyzed-track.json path")
+    refine_beatgrid_phase.add_argument("audio_path", type=Path, help="local audio path matching the analyzed track")
+    refine_beatgrid_phase.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="output refined analyzed-track.json path",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--report",
+        required=True,
+        type=Path,
+        help="output beatgrid-phase-refinement-report.json path",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--smoke-dir",
+        type=Path,
+        help="optional directory for short metronome WAVs around accepted drop anchors",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--anchor-time",
+        action="append",
+        default=[],
+        help="optional drop anchor in seconds or label=seconds form; repeatable. Defaults to drop cuePoints.",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--sample-rate",
+        type=int,
+        default=44_100,
+        help="analysis sample rate",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--search-window-ms",
+        type=float,
+        default=450.0,
+        help="drop-wall search window on each side of each anchor in milliseconds",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--preferred-window-ms",
+        type=float,
+        default=120.0,
+        help="preferred drop-wall candidate window around each anchor in milliseconds",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--min-wall-score",
+        type=float,
+        default=0.45,
+        help="minimum selected drop-wall score for an anchor to vote on phase",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--max-wall-offset-ms",
+        type=float,
+        default=120.0,
+        help="maximum selected wall distance from the semantic anchor in milliseconds",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--consensus-tolerance-ms",
+        type=float,
+        default=15.0,
+        help="maximum disagreement between accepted anchor phase corrections in milliseconds",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--min-consensus-anchors",
+        type=int,
+        default=1,
+        help="minimum accepted inlier anchors required to apply the shift",
+    )
+    refine_beatgrid_phase.add_argument(
+        "--json",
+        action="store_true",
+        help="print the refinement summary as JSON",
     )
 
     benchmark_drop_anchors = subparsers.add_parser(
@@ -693,6 +1091,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="maximum absolute incoming-source nudge in milliseconds",
     )
     nudge_mixplan.add_argument(
+        "--micro-align-ms",
+        type=float,
+        default=0.0,
+        help="maximum post-transient micro-alignment adjustment in milliseconds",
+    )
+    nudge_mixplan.add_argument(
+        "--micro-window-ms",
+        type=float,
+        default=30.0,
+        help="milliseconds on either side of the selected transient used for micro-alignment correlation",
+    )
+    nudge_mixplan.add_argument(
+        "--min-micro-improvement",
+        type=float,
+        default=0.03,
+        help="minimum correlation improvement required before applying micro-alignment",
+    )
+    nudge_mixplan.add_argument(
         "--json",
         action="store_true",
         help="print the nudge summary as JSON",
@@ -801,6 +1217,36 @@ def _print_batch_human(result: BatchAnalysisResult) -> None:
         )
 
 
+def _print_canonical_audio_human(summary: dict[str, object]) -> None:
+    status = "ok" if summary.get("ok") else "failed"
+    print(f"Canonical audio {status}")
+    print(f"Manifest: {summary.get('manifestPath')}")
+    print(f"Output root: {summary.get('outputRoot')}")
+    print(
+        "Tracks: "
+        f"total={summary.get('total', 0)}, "
+        f"canonicalized={summary.get('canonicalized', 0)}, "
+        f"skipped={summary.get('skipped', 0)}, "
+        f"failed={summary.get('failed', 0)}"
+    )
+    for track in summary.get("tracks", []):
+        if not isinstance(track, dict):
+            continue
+        line = f"- {track.get('trackId', '<unknown>')}: {track.get('status', '<unknown>')}"
+        if track.get("canonicalPath"):
+            line += f" -> {track['canonicalPath']}"
+        error = track.get("error")
+        if isinstance(error, dict):
+            line += f" ({error.get('code', 'error')}: {error.get('message', '')})"
+        print(line)
+
+
+def _timeline_policy_for_audio_path(path: Path) -> str:
+    if path.name == CANONICAL_AUDIO_FILENAME and (path.parent / CANONICAL_AUDIO_METADATA_FILENAME).exists():
+        return CANONICAL_TIMELINE_POLICY
+    return "direct-audio-path"
+
+
 def _manifest_error_payload(error: ManifestError, manifest_path: Path, cache_root: Path) -> dict[str, object]:
     return {
         "ok": False,
@@ -879,6 +1325,10 @@ def main(
     signal_analyzer: SignalAnalyzer | None = None,
     timing_benchmark_runner=None,
     semantic_benchmark_runner=None,
+    key_benchmark_runner=None,
+    tempo_stretch_runner=None,
+    tempo_stretch_smoke_runner=None,
+    canonical_audio_runner=None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -910,6 +1360,7 @@ def main(
                     probe_runner=probe_runner,
                     signal_analyzer=signal_analyzer,
                     section_backend=args.section_backend,
+                    canonical_audio_root=args.canonical_audio_root,
                 )
             except ManifestError as exc:
                 if args.json:
@@ -924,12 +1375,57 @@ def main(
                 _print_batch_human(result)
             return 0 if result.ok else 1
 
+        if args.command == "canonicalize-audio":
+            runner = canonical_audio_runner or canonicalize_repository_manifest
+            try:
+                summary = runner(
+                    args.repository_manifest,
+                    args.out,
+                    options=CanonicalAudioOptions(
+                        ffmpeg_path=args.ffmpeg,
+                        ffprobe_path=args.ffprobe,
+                        force=args.force,
+                        target_sample_rate=args.sample_rate,
+                        fallback_sample_rate=args.fallback_sample_rate,
+                    ),
+                )
+            except ManifestError as exc:
+                summary = _manifest_error_payload(exc, args.repository_manifest, args.out)
+                summary["artifact"] = "canonical-audio-batch"
+                if not args.json:
+                    print(f"autodj-analysis: {exc.message}", file=sys.stderr)
+                    return 1
+            except CanonicalAudioError as exc:
+                summary = {
+                    "ok": False,
+                    "artifact": "canonical-audio-batch",
+                    "manifestPath": str(args.repository_manifest),
+                    "outputRoot": str(args.out),
+                    "total": 0,
+                    "canonicalized": 0,
+                    "skipped": 0,
+                    "failed": 1,
+                    "tracks": [],
+                    "errors": [exc.to_dict()],
+                }
+                if not args.json:
+                    print(f"autodj-analysis: {exc.message}", file=sys.stderr)
+                    return 1
+
+            if args.json:
+                _print_json(summary)
+            else:
+                _print_canonical_audio_human(summary)
+            return 0 if summary.get("ok") else 1
+
         if args.command == "debug-waveform":
             decoded_audio = load_audio(args.audio_path, target_sample_rate=args.sample_rate)
             artifact = build_debug_waveform_artifact(
                 args.track_id or args.audio_path.stem,
                 decoded_audio,
                 analyzer_version=__version__,
+                source_path=decoded_audio.source_path,
+                timeline_policy=_timeline_policy_for_audio_path(decoded_audio.source_path),
                 target_point_count=args.points,
                 low_cutoff_hz=args.low_cutoff_hz,
                 high_cutoff_hz=args.high_cutoff_hz,
@@ -941,6 +1437,7 @@ def main(
                 "outputPath": str(output_path),
                 "points": len(artifact["points"]),
                 "durationSeconds": artifact["durationSeconds"],
+                "sourceTimelinePolicy": artifact["source"]["timelinePolicy"],
             }
             if args.json:
                 _print_json(payload)
@@ -969,6 +1466,26 @@ def main(
                 _print_json(payload)
             else:
                 print(f"Rekordbox overrides written: {output_path}")
+            return 0
+
+        if args.command == "apply-rekordbox-semantics":
+            output_path = apply_rekordbox_semantic_xml_file(
+                args.analyzed_track,
+                args.rekordbox_xml,
+                args.out,
+                track_name=args.track_name,
+            )
+            payload = {
+                "ok": True,
+                "artifact": "analyzed-track",
+                "outputPath": str(output_path),
+                "source": "rekordbox.xml",
+                "mode": "semantic_only",
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Rekordbox semantic labels written: {output_path}")
             return 0
 
         if args.command == "export-rekordbox-xml":
@@ -1051,6 +1568,63 @@ def main(
                 print(f"Semantic section benchmark written: {args.out / 'semantic-section-benchmark-summary.json'}")
             return 0
 
+        if args.command == "benchmark-keys":
+            candidates = tuple(candidate.strip() for candidate in args.candidates.split(",") if candidate.strip())
+            runner = key_benchmark_runner or run_key_benchmark
+            summary = runner(
+                load_key_benchmark_cases(args.rekordbox_xml),
+                args.out,
+                candidates=candidates,
+                analysis_sample_rate=args.sample_rate,
+            )
+            if args.json:
+                _print_json(summary)
+            else:
+                print(f"Key benchmark written: {args.out / 'key-benchmark-summary.json'}")
+            return 0
+
+        if args.command == "tempo-stretch-smoke":
+            backends = tuple(candidate.strip() for candidate in args.backends.split(",") if candidate.strip())
+            runner = tempo_stretch_smoke_runner or run_tempo_stretch_smoke
+            summary = runner(
+                args.audio,
+                args.out,
+                source_bpm=args.source_bpm,
+                target_bpm=args.target_bpm,
+                backends=backends,
+                sample_rate=args.sample_rate,
+                quality=args.quality,
+                target_bpm_bias=args.target_bpm_bias,
+            )
+            if args.json:
+                _print_json(summary)
+            else:
+                print(f"Tempo-stretch smoke outputs written: {args.out}")
+            return 0 if summary.get("ok") else 1
+
+        if args.command == "stretch-audio":
+            runner = tempo_stretch_runner or stretch_audio_file
+            result = runner(
+                args.audio_path,
+                args.out,
+                report_path=args.report,
+                options=TempoStretchOptions(
+                    source_bpm=args.source_bpm,
+                    target_bpm=args.target_bpm,
+                    backend=args.backend,
+                    sample_rate=args.sample_rate,
+                    quality=args.quality,
+                    target_bpm_bias=args.target_bpm_bias,
+                ),
+            )
+            payload = result.to_dict() if hasattr(result, "to_dict") else result
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Tempo-stretched WAV written: {args.out}")
+                print(f"Tempo-stretch report written: {args.report}")
+            return 0 if payload.get("ok", True) else 1
+
         if args.command == "render-mixplan":
             result = render_mix_plan_file(
                 args.mix_plan,
@@ -1058,6 +1632,8 @@ def main(
                 RenderOptions(
                     sample_rate=args.sample_rate,
                     asset_root=args.asset_root,
+                    tempo_backend=args.tempo_backend,
+                    tempo_quality=args.tempo_quality,
                 ),
             )
             if args.json:
@@ -1078,6 +1654,87 @@ def main(
                 _print_json(json.loads(output_path.read_text(encoding="utf-8")))
             else:
                 print(f"Drop-anchor ranking written: {output_path}")
+            return 0
+
+        if args.command == "drop-wall-debug":
+            output_path = detect_drop_wall_file(
+                args.audio_path,
+                args.out,
+                approximate_time_seconds=args.time,
+                svg_path=args.svg,
+                track_id=args.track_id,
+                options=DropWallOptions(
+                    sample_rate=args.sample_rate,
+                    search_window_seconds=args.search_window_ms / 1000.0,
+                    preferred_window_seconds=args.preferred_window_ms / 1000.0,
+                    preferred_score_ratio=args.preferred_score_ratio,
+                ),
+            )
+            artifact = json.loads(output_path.read_text(encoding="utf-8"))
+            payload = {
+                "ok": True,
+                "artifact": "drop-wall-debug",
+                "outputPath": str(output_path),
+                "svgPath": str(args.svg) if args.svg is not None else None,
+                "selectedWall": artifact["selectedWall"],
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                selected = artifact["selectedWall"]
+                print(f"Drop-wall debug written: {output_path}")
+                if args.svg is not None:
+                    print(f"Drop-wall SVG written: {args.svg}")
+                print(
+                    "Selected wall: "
+                    f"{selected['timeSeconds']:.3f}s "
+                    f"({selected['offsetMilliseconds']:+.1f} ms, score {selected['score']:.3f})"
+                )
+            return 0
+
+        if args.command == "refine-beatgrid-phase":
+            output_path = refine_beatgrid_phase_file(
+                args.analyzed_track,
+                args.audio_path,
+                args.out,
+                report_path=args.report,
+                smoke_dir=args.smoke_dir,
+                anchors=tuple(parse_phase_anchor(value) for value in args.anchor_time),
+                options=BeatgridPhaseOptions(
+                    sample_rate=args.sample_rate,
+                    search_window_seconds=args.search_window_ms / 1000.0,
+                    preferred_window_seconds=args.preferred_window_ms / 1000.0,
+                    min_wall_score=args.min_wall_score,
+                    max_wall_offset_seconds=args.max_wall_offset_ms / 1000.0,
+                    consensus_tolerance_seconds=args.consensus_tolerance_ms / 1000.0,
+                    min_consensus_anchors=args.min_consensus_anchors,
+                ),
+            )
+            report = json.loads(args.report.read_text(encoding="utf-8"))
+            payload = {
+                "ok": True,
+                "artifact": "beatgrid-phase-refinement",
+                "outputPath": str(output_path),
+                "reportPath": str(args.report),
+                "smokeDir": str(args.smoke_dir) if args.smoke_dir is not None else None,
+                "applied": report["applied"],
+                "phaseShiftMilliseconds": report["phaseShiftMilliseconds"],
+                "acceptedAnchorCount": report["acceptedAnchorCount"],
+                "consensusAnchorCount": report["consensusAnchorCount"],
+                "warnings": report["warnings"],
+            }
+            if args.json:
+                _print_json(payload)
+            else:
+                print(f"Refined analyzed track written: {output_path}")
+                print(f"Phase report written: {args.report}")
+                if args.smoke_dir is not None:
+                    print(f"Metronome smoke WAVs written under: {args.smoke_dir}")
+                print(
+                    "Beatgrid phase shift: "
+                    f"{report['phaseShiftMilliseconds']:+.3f} ms "
+                    f"({'applied' if report['applied'] else 'not applied'})"
+                )
             return 0
 
         if args.command == "benchmark-drop-anchors":
@@ -1162,6 +1819,9 @@ def main(
                     asset_root=args.asset_root,
                     window_seconds=args.window_ms / 1000.0,
                     max_nudge_seconds=args.max_nudge_ms / 1000.0,
+                    micro_alignment_seconds=args.micro_align_ms / 1000.0,
+                    micro_alignment_window_seconds=args.micro_window_ms / 1000.0,
+                    min_micro_alignment_improvement=args.min_micro_improvement,
                 ),
             )
             if args.json:

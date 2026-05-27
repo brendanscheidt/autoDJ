@@ -33,6 +33,7 @@ tracks with:
 
 - Low beat-grid confidence.
 - Missing or ambiguous drop sections.
+- Missing or incompatible Camelot key data for long harmonic overlaps.
 - Tempo too far outside the target range.
 - Unusable intro/outro material.
 - High vocal clash risk.
@@ -123,8 +124,10 @@ Use when:
 - Song 1 has a high-confidence second build and known bar count until drop 2.
 - Song 2 has a compatible build 1 and drop 1.
 - The two builds can be aligned so both drops land on the same downbeat.
-- The normalized BPM values are exactly equal for the POC. Do not apply BPM
-  tolerance or time-stretching until a dedicated tempo-control backend exists.
+- Native exact normalized BPM matches are preferred. If no exact pair is chosen,
+  the POC may use SoundStretch to render the incoming song to the outgoing
+  song's normalized BPM when the delta is inside the configured gate. The
+  effective BPM at the overlap must still be exact.
 
 Typical automation:
 
@@ -137,6 +140,9 @@ Typical automation:
   drop.
 - Apply transient nudge to the incoming source around the transition anchors so
   kicks/transients line up by ear.
+- If SoundStretch was used, the nudge pass must use tempo-aware source/timeline
+  mapping and the rendered asset should be validated before trusting long
+  beat-locked overlap.
 
 ### Drop Double
 
@@ -280,7 +286,12 @@ weight beat-grid confidence more heavily than key compatibility.
 
 High score:
 
-- Exact normalized BPM match for drop switches in the current POC.
+- Exact effective normalized BPM match at the drop-switch overlap.
+- Native exact normalized BPM match remains preferred when available.
+- Tempo-matched drop switches may be considered when the incoming deck can be
+  rendered with SoundStretch to the outgoing deck's BPM inside the configured
+  adjustment window. Midpoint bridge planning, where both decks move to a shared
+  middle BPM, remains a future extension.
 - Normalized BPM delta <= 1% for simpler non-time-stretched transitions.
 - Beat grid confidence is high.
 
@@ -292,9 +303,26 @@ Low score:
 
 - Delta > 5%, unless doing an intentional hard cut.
 
+Current tempo-stretch planning target:
+
+- Default `maxTempoAdjustmentBpmPerDeck = 10.0`.
+- A `145 BPM` outgoing track and `150 BPM` incoming track can become eligible
+  by rendering the incoming track to `145 BPM` with SoundStretch, if rendered
+  timing and manual audition pass.
+- A `140 BPM` outgoing track and `160 BPM` incoming track is still outside the
+  current one-sided generated-audition path, even though a future midpoint
+  bridge could theoretically meet at `150 BPM`.
+- Tempo matching changes eligibility; it does not remove the need for
+  compatible key, phrase, energy, and transient alignment.
+
 ### Key Compatibility
 
 Use Camelot-style compatibility when available.
+
+For key detection work, Rekordbox XML `Tonality` values are benchmark truth, not
+the production key source. `AnalyzedTrack.key.camelot` comes from
+`selected-madmom-keyfinder`, which chooses confident madmom CNN output and falls
+back to keyfinder when madmom confidence is below the production gate.
 
 High score:
 
@@ -305,6 +333,20 @@ High score:
 Low score:
 
 - Distant key with sustained melodic/vocal overlap.
+
+Current planner behavior:
+
+- Drop-switch candidates with confident distant Camelot clashes are rejected for
+  the second-build drop-switch template. Generated audition batches filter to
+  Camelot-compatible pairs by default and can include exact-BPM or
+  SoundStretch-eligible BPM-matched pairs depending on the batch tempo policy.
+- Reverb exits warn on key clashes but do not block, because the dry overlap is
+  intentionally short.
+- Missing or low-confidence key metadata is annotated as unknown compatibility
+  inside strategy diagnostics. Generated key-aware audition batches should use
+  freshly analyzed artifacts with `AnalyzedTrack.key.camelot` populated; the
+  default batch filter rejects unknown key compatibility for long drop-switch
+  overlaps.
 
 Key matters less for short percussion-heavy cuts and more for blends, doubles,
 and vocals.

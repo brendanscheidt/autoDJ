@@ -20,6 +20,12 @@ struct DubstepPocPlanOptions final {
     domain::PlanId planId{"plan-dubstep-poc"};
     std::string createdAtUtc{"2026-01-01T00:00:00Z"};
     std::string randomSeed{"deterministic-poc"};
+    bool allowTempoStretch{true};
+    double maxTempoAdjustmentBpmPerDeck{10.0};
+    std::string tempoBackend{"soundstretch"};
+    std::string tempoBackendVersion{"2.3.2"};
+    std::string tempoQuality{"standard"};
+    bool requiresRenderedBpmValidation{true};
 };
 
 struct DubstepPocPlanResult final {

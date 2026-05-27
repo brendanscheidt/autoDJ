@@ -656,4 +656,25 @@
       MIR dependencies.
     - Confirmed generated real audio, local analysis cache, and audition outputs
       remain ignored by `.gitignore` and are not staged.
+  - Follow-up verification, 2026-05-27:
+    - Added a full-set POC generator at
+      `tools/scripts/generate_full_set_poc.py` that chains pairwise
+      drop-switch and wash-out plans across the 48-track dubstep test folder.
+    - Fixed wash-out FX state leakage by resetting incoming-deck
+      `reverbWet`, `reverbTailGain`, and `echoWet`, and by returning
+      wash-out `reverbWet` to `0` at handoff while `reverbTailGain` carries
+      the post-fader tail.
+    - Fixed full-set rendering bleed by truncating each outgoing placement to
+      its actual stop command. The offline renderer is placement-driven, so a
+      stop command alone is not enough to prevent an old track from continuing
+      under later transitions.
+    - Hardened the full-set generator with validation that rejects plans where
+      outgoing placements overrun their stop time or drop-switch windows contain
+      positive reverb/tail/echo automation.
+    - Verified with:
+      `python -m py_compile tools/scripts/generate_full_set_poc.py`;
+      `cmake --build --preset debug --target autodj_dj_tests autodj_mixplan_poc`;
+      `ctest --preset debug -R "autodj_dj_tests" --output-on-failure`;
+      WSL `pytest analysis/worker-python/tests/test_mixplan_renderer.py -q`;
+      and a no-render full-set validation smoke run.
   - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_

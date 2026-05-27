@@ -9,7 +9,9 @@ Python offline analysis worker.
 Desktop app / workbench:      C++20 + JUCE
 Build system:                 CMake + CMakePresets + CTest
 Playback engine:              C++20, JUCE audio primitives, swappable DSP backends
-Time-stretch/pitch-shift:     Abstract interface; evaluate Superpowered/Rubber Band later
+Time-stretch/pitch-shift:     Abstract interface; Spec 009 evaluates Rubber Band,
+                               SoundTouch, Signalsmith Stretch, Superpowered,
+                               zplane elastique, and related SDKs
 Analysis POC worker:          Python 3.11 in WSL for the full MIR stack;
                                lightweight Windows Python for dev/test only
 Selected timing backend:      current-autodj-signal
@@ -154,6 +156,9 @@ Current selected analysis stack:
   timing stack.
 - Trusted POC semantic source: Rekordbox XML hot-cue labels normalized into the
   `AnalyzedTrack` section/cue contract.
+- Key: `selected-madmom-keyfinder`, a production confidence-gate ensemble that
+  chooses `madmom-cnn-key` at confidence `>= 0.30` and otherwise falls back to
+  `keyfinder`.
 - Experimental automatic sections: `dubstep-phrase-hybrid`, which fuses
   All-In-One and SongFormer boundary evidence with selected
   beatgrid/energy/bass/onset features and dubstep phrase heuristics.
@@ -409,8 +414,8 @@ Sources:
 
 ## Time-Stretch And Pitch-Shift Backends
 
-Do not bind the architecture to a specific implementation yet. Define an engine
-interface first:
+Do not bind the architecture to a specific implementation until Spec 009
+auditions real dubstep transitions. Define an engine interface first:
 
 ```cpp
 class ITimeStretchEngine {
@@ -431,12 +436,25 @@ Candidates:
   GPL/commercial licensing.
 - SoundTouch: simpler tempo/pitch/rate library, useful for experiments.
 - zplane elastique: commercial pro-grade option, evaluate if quality demands it.
+- Signalsmith Stretch: MIT header-only C++ pitch/time library, attractive for
+  native integration if quality is acceptable.
+- Zynaptiq ZTX: commercial high-end C/C++ SDK for time-stretching,
+  pitch-shifting, and formant-aware processing.
 
-Recommended MVP path:
+Current MVP path:
 
-- Build the player with an identity/no-op or simple resampling backend first.
-- Keep tempo matching conservative.
-- Add a high-quality backend only when deck playback and automation are stable.
+- Spec 009 should add pitch-preserving tempo control before broad set planning.
+- Engine/manual MixPlans may request arbitrary stretch ratios, subject to
+  backend capability and explicit quality warnings.
+- Automatic planner selection should default to a configurable
+  `maxTempoAdjustmentBpmPerDeck = 10.0`, allowing a total 20 BPM bridge when
+  both decks can meet at an exact shared transition BPM.
+- Start with local/offline audition quality before committing to a native/mobile
+  runtime dependency.
+- Spec 010 now handles canonical PCM/drop-anchor timing refinement because exact
+  drop timing became the project-critical risk. The inverse tool, key shifting
+  without changing BPM, remains the next planned pitch/time toolbox spec after
+  the timing work.
 
 Sources:
 
