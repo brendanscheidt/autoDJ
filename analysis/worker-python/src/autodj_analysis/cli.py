@@ -17,6 +17,9 @@ from .batch import (
     SignalAnalyzer,
     analyze_repository_manifest,
 )
+from .backends.keyfinder_key import KEYFINDER_KEY_BACKEND
+from .backends.madmom_key import MADMOM_KEY_BACKEND
+from .backends.selected_key import SELECTED_KEY_BACKEND
 from .canonical_audio import (
     CANONICAL_AUDIO_FILENAME,
     CANONICAL_AUDIO_METADATA_FILENAME,
@@ -151,12 +154,33 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     analyze_batch.add_argument(
+        "--key-backend",
+        choices=(SELECTED_KEY_BACKEND, KEYFINDER_KEY_BACKEND, MADMOM_KEY_BACKEND),
+        default=SELECTED_KEY_BACKEND,
+        help=(
+            "key detection backend for artifact generation "
+            f"(default: {SELECTED_KEY_BACKEND}; use {KEYFINDER_KEY_BACKEND} for fast batch analysis)"
+        ),
+    )
+    analyze_batch.add_argument(
         "--canonical-audio-root",
         type=Path,
         help=(
             "optional canonical PCM cache root from canonicalize-audio; when set, "
             "signal analysis uses tracks/<track-id>/canonical.wav"
         ),
+    )
+    analyze_batch.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="number of tracks to analyze concurrently; use 1 for deterministic single-worker analysis",
+    )
+    analyze_batch.add_argument(
+        "--debug-waveform-points",
+        type=int,
+        default=0,
+        help="also write tracks/<track-id>/debug-waveform.json with this many RGB waveform points; 0 disables it",
     )
     analyze_batch.add_argument(
         "--json",
@@ -655,6 +679,107 @@ def build_parser() -> argparse.ArgumentParser:
         help="print the render summary as JSON",
     )
 
+    plan_set = subparsers.add_parser(
+        "plan-set",
+        help="plan a full AutoDJ set from existing analyzed-track artifacts",
+    )
+    plan_set.add_argument("--project-root", type=Path, help="repository root; defaults to this project")
+    plan_set.add_argument("--audio-folder", type=Path, help="folder containing source audio assets")
+    plan_set.add_argument("--analysis-root", type=Path, help="analysis cache root containing tracks/*/analyzed-track.json")
+    plan_set.add_argument("--run-name", help="run-specific output folder name")
+    plan_set.add_argument("--track-count", type=int, help="maximum number of tracks to include")
+    plan_set.add_argument("--seed", help="deterministic planning seed")
+    plan_set.add_argument("--max-tempo-adjustment-bpm", type=float, help="maximum one-sided SoundStretch BPM adjustment")
+    plan_set.add_argument(
+        "--allow-drop-switch-tempo-stretch",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="allow drop switches between different BPM tracks; disabled by default in safe mode",
+    )
+    plan_set.add_argument(
+        "--drop-switch-key-policy",
+        choices=("compatible", "allow-unknown"),
+        help="drop-switch Camelot gate; allow-unknown rejects only confident key clashes",
+    )
+    plan_set.add_argument("--max-total-stretch-bpm", type=float, help="maximum cumulative drop-switch stretch budget")
+    plan_set.add_argument("--candidate-search-width", type=int, help="maximum candidate attempts per transition family")
+    plan_set.add_argument("--max-consecutive-wash-outs", type=int, help="maximum wash-outs allowed in a row")
+    plan_set.add_argument(
+        "--avoid-repeated-artist",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="avoid immediate same-artist/slug transitions when possible",
+    )
+    plan_set.add_argument(
+        "--emergency-fallback",
+        choices=("stop", "allow-repeated-artist"),
+        help="fallback behavior when normal policy cannot find a transition",
+    )
+    plan_set.add_argument("--min-nudge-confidence", type=float, help="minimum drop-switch nudge confidence")
+    plan_set.add_argument(
+        "--min-stretched-drop-switch-nudge-confidence",
+        type=float,
+        help="minimum nudge confidence for tempo-stretched drop switches",
+    )
+    plan_set.add_argument("--max-drop-switch-nudge-ms", type=float, help="maximum absolute nudge allowed for drop switches")
+    plan_set.add_argument(
+        "--max-nudge-anchor-disagreement-ms",
+        type=float,
+        help="maximum allowed disagreement between nudge anchors in milliseconds",
+    )
+    plan_set.add_argument(
+        "--max-rendered-alignment-correction-ms",
+        type=float,
+        help="maximum extra rendered-domain source correction allowed for drop switches",
+    )
+    plan_set.add_argument(
+        "--max-rendered-probe-residual-ms",
+        type=float,
+        help="maximum residual allowed across rendered-domain beat probes for drop switches",
+    )
+    plan_set.add_argument(
+        "--prove-rendered-drop-switch-alignment",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="opt into the expensive rendered-domain nudge proof for selected drop switches",
+    )
+    plan_set.add_argument("--sample-rate", type=int, help="render sample rate")
+    plan_set.add_argument(
+        "--washout-sweep-uri",
+        help="source URI/path for the user-rendered wash-out sweep asset used by wash-out transitions",
+    )
+    plan_set.add_argument("--preview-pre-seconds", type=float, help="seconds before each transition preview")
+    plan_set.add_argument("--preview-post-seconds", type=float, help="seconds after each transition preview")
+    plan_set.add_argument("--preview-fx-preroll-seconds", type=float, help="extra FX preroll before preview start")
+    plan_set.add_argument(
+        "--mode",
+        choices=("plan-only", "plan-preview", "full-render", "full-plan-preview-render"),
+        default="full-render",
+        help=(
+            "plan-only writes reports/MixPlan; plan-preview also renders transition previews; "
+            "full-render renders the set WAV; full-plan-preview-render renders both previews and the full WAV"
+        ),
+    )
+
+    preview_mixplan = subparsers.add_parser(
+        "preview-mixplan",
+        help="extract one short preview MixPlan per transition, optionally rendering preview WAVs",
+    )
+    preview_mixplan.add_argument("mix_plan", type=Path, help="full-set MixPlan JSON path")
+    preview_mixplan.add_argument("--out", required=True, type=Path, help="preview pack output directory")
+    preview_mixplan.add_argument("--asset-root", type=Path, help="optional asset root used when rendering previews")
+    preview_mixplan.add_argument("--sample-rate", type=int, default=44_100, help="preview render sample rate")
+    preview_mixplan.add_argument("--pre-seconds", type=float, default=32.0, help="seconds before each transition")
+    preview_mixplan.add_argument("--post-seconds", type=float, default=24.0, help="seconds after each transition")
+    preview_mixplan.add_argument(
+        "--fx-preroll-seconds",
+        type=float,
+        default=2.0,
+        help="extra hidden/pre-listen context before preview start for FX state",
+    )
+    preview_mixplan.add_argument("--render", action="store_true", help="render preview WAVs after writing preview MixPlans")
+    preview_mixplan.add_argument("--json", action="store_true", help="print the preview index as JSON")
+
     rank_drop_anchors = subparsers.add_parser(
         "rank-drop-anchors",
         help="rank likely drop-start anchors from an analyzed-track JSON artifact",
@@ -1109,6 +1234,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="minimum correlation improvement required before applying micro-alignment",
     )
     nudge_mixplan.add_argument(
+        "--prove-rendered-alignment",
+        action="store_true",
+        help="render tempo-stretched sources and prove/correct the final audible transient alignment",
+    )
+    nudge_mixplan.add_argument(
+        "--max-rendered-correction-ms",
+        type=float,
+        default=30.0,
+        help="maximum extra source-start correction allowed by rendered-domain alignment proof",
+    )
+    nudge_mixplan.add_argument(
+        "--max-rendered-probe-residual-ms",
+        type=float,
+        default=999_000.0,
+        help="maximum residual allowed across rendered-domain beat probes; high default records diagnostics without gating",
+    )
+    nudge_mixplan.add_argument(
+        "--min-rendered-probes",
+        type=int,
+        default=3,
+        help="minimum usable rendered-domain beat probes required",
+    )
+    nudge_mixplan.add_argument(
+        "--tempo-backend",
+        default="soundstretch",
+        help="tempo-stretch backend used for rendered-domain alignment proof",
+    )
+    nudge_mixplan.add_argument(
+        "--tempo-quality",
+        default="standard",
+        help="tempo-stretch quality used for rendered-domain alignment proof",
+    )
+    nudge_mixplan.add_argument(
+        "--ffmpeg",
+        default="ffmpeg",
+        help="ffmpeg executable used by rendered-domain alignment proof",
+    )
+    nudge_mixplan.add_argument(
         "--json",
         action="store_true",
         help="print the nudge summary as JSON",
@@ -1153,6 +1316,42 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=-3.0,
         help="minimum allowed incoming-drop-vs-layered-build RMS delta before risk is reported",
+    )
+    gain_plan_drop_switch.add_argument(
+        "--target-drop-loudness-tolerance-db",
+        type=float,
+        default=0.5,
+        help="allowed incoming-drop RMS error before applying gain",
+    )
+    gain_plan_drop_switch.add_argument(
+        "--max-incoming-boost-db",
+        type=float,
+        default=6.0,
+        help="maximum incoming drop volume boost in dB before the renderer soft-limiter catches peaks",
+    )
+    gain_plan_drop_switch.add_argument(
+        "--max-incoming-trim-db",
+        type=float,
+        default=0.0,
+        help="maximum incoming drop trim in dB; default 0 keeps drops as the loudness reference",
+    )
+    gain_plan_drop_switch.add_argument(
+        "--drop-peak-match-tolerance-db",
+        type=float,
+        default=0.25,
+        help="allowed first-drop-beat peak mismatch before boosting the incoming drop",
+    )
+    gain_plan_drop_switch.add_argument(
+        "--max-drop-peak-match-boost-db",
+        type=float,
+        default=4.0,
+        help="maximum incoming drop boost applied specifically for first-drop-beat peak matching",
+    )
+    gain_plan_drop_switch.add_argument(
+        "--drop-peak-window-beats",
+        type=float,
+        default=1.0,
+        help="number of beats after each drop anchor used for peak matching",
     )
     gain_plan_drop_switch.add_argument(
         "--sample-rate",
@@ -1360,7 +1559,10 @@ def main(
                     probe_runner=probe_runner,
                     signal_analyzer=signal_analyzer,
                     section_backend=args.section_backend,
+                    key_backend=args.key_backend,
                     canonical_audio_root=args.canonical_audio_root,
+                    workers=args.workers,
+                    debug_waveform_points=args.debug_waveform_points if args.debug_waveform_points > 0 else None,
                 )
             except ManifestError as exc:
                 if args.json:
@@ -1644,6 +1846,90 @@ def main(
                 print(f"State trace written: {result.trace_path}")
             return 0
 
+        if args.command == "plan-set":
+            from .full_set_planner import main as plan_set_main
+
+            planner_argv: list[str] = []
+            for option_name in (
+                "project_root",
+                "audio_folder",
+                "analysis_root",
+                "run_name",
+                "track_count",
+                "seed",
+                "max_tempo_adjustment_bpm",
+                "drop_switch_key_policy",
+                "max_total_stretch_bpm",
+                "candidate_search_width",
+                "max_consecutive_wash_outs",
+                "emergency_fallback",
+                "min_nudge_confidence",
+                "min_stretched_drop_switch_nudge_confidence",
+                "max_drop_switch_nudge_ms",
+                "max_nudge_anchor_disagreement_ms",
+                "max_rendered_alignment_correction_ms",
+                "max_rendered_probe_residual_ms",
+                "sample_rate",
+                "washout_sweep_uri",
+                "preview_pre_seconds",
+                "preview_post_seconds",
+                "preview_fx_preroll_seconds",
+            ):
+                value = getattr(args, option_name)
+                if value is not None:
+                    planner_argv.extend([f"--{option_name.replace('_', '-')}", str(value)])
+            if not args.avoid_repeated_artist:
+                planner_argv.append("--no-avoid-repeated-artist")
+            if args.allow_drop_switch_tempo_stretch is not None:
+                planner_argv.append(
+                    "--allow-drop-switch-tempo-stretch"
+                    if args.allow_drop_switch_tempo_stretch
+                    else "--no-allow-drop-switch-tempo-stretch"
+                )
+            if args.prove_rendered_drop_switch_alignment is not None:
+                planner_argv.append(
+                    "--prove-rendered-drop-switch-alignment"
+                    if args.prove_rendered_drop_switch_alignment
+                    else "--no-prove-rendered-drop-switch-alignment"
+                )
+            if args.mode in ("plan-only", "plan-preview"):
+                planner_argv.append("--skip-render")
+            if args.mode in ("plan-preview", "full-plan-preview-render"):
+                planner_argv.append("--render-previews")
+            return plan_set_main(planner_argv)
+
+        if args.command == "preview-mixplan":
+            from .transition_preview import (
+                TransitionPreviewOptions,
+                TransitionPreviewPackOptions,
+                write_transition_preview_pack,
+            )
+
+            summary = write_transition_preview_pack(
+                args.mix_plan,
+                args.out,
+                options=TransitionPreviewPackOptions(
+                    preview=TransitionPreviewOptions(
+                        pre_seconds=args.pre_seconds,
+                        post_seconds=args.post_seconds,
+                        fx_preroll_seconds=args.fx_preroll_seconds,
+                    ),
+                    render=args.render,
+                    asset_root=args.asset_root,
+                    sample_rate=args.sample_rate,
+                ),
+            )
+            if args.json:
+                _print_json(summary)
+            else:
+                print(f"Transition preview index written: {args.out / 'index.json'}")
+                print(f"Previews planned: {summary['planned']} / {summary['total']}")
+                if args.render:
+                    print(f"Previews rendered: {summary['rendered']} / {summary['total']}")
+                    if summary["failed"]:
+                        print(f"Preview failures: {summary['failed']}")
+            return 0
+
         if args.command == "rank-drop-anchors":
             output_path = rank_drop_anchors_file(
                 args.analyzed_track,
@@ -1822,6 +2108,13 @@ def main(
                     micro_alignment_seconds=args.micro_align_ms / 1000.0,
                     micro_alignment_window_seconds=args.micro_window_ms / 1000.0,
                     min_micro_alignment_improvement=args.min_micro_improvement,
+                    prove_rendered_alignment=args.prove_rendered_alignment,
+                    max_rendered_alignment_correction_seconds=args.max_rendered_correction_ms / 1000.0,
+                    max_rendered_probe_residual_seconds=args.max_rendered_probe_residual_ms / 1000.0,
+                    min_rendered_alignment_probes=args.min_rendered_probes,
+                    tempo_stretch_backend=args.tempo_backend,
+                    tempo_stretch_quality=args.tempo_quality,
+                    ffmpeg_path=args.ffmpeg,
                 ),
             )
             if args.json:
@@ -1842,6 +2135,12 @@ def main(
                     target_headroom_db=args.target_headroom_db,
                     max_overlap_gain_reduction_db=args.max_overlap_gain_reduction_db,
                     drop_energy_floor_db=args.drop_energy_floor_db,
+                    target_drop_loudness_tolerance_db=args.target_drop_loudness_tolerance_db,
+                    max_incoming_boost_db=args.max_incoming_boost_db,
+                    max_incoming_trim_db=args.max_incoming_trim_db,
+                    drop_peak_match_tolerance_db=args.drop_peak_match_tolerance_db,
+                    max_drop_peak_match_boost_db=args.max_drop_peak_match_boost_db,
+                    drop_peak_window_beats=args.drop_peak_window_beats,
                 ),
             )
             if args.json:

@@ -132,7 +132,6 @@ def _write_refined_anchor_report(path: Path, *, track_id: str, source_seconds: f
                     "allowedTransitionFamilies": [
                         "drop_switch",
                         "layered_drop",
-                        "double_drop",
                         "reverb_exit",
                         "simple_handoff",
                     ],

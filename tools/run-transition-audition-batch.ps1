@@ -7,6 +7,11 @@ param(
     [int]$DropSwitchCount = 10,
     [Alias("WashOutCount")]
     [int]$ReverbExitCount = 10,
+    [int]$AnalysisWorkers = 2,
+    [ValidateSet("current-autodj-signal", "dubstep-phrase-hybrid")]
+    [string]$AnalysisSectionBackend = "current-autodj-signal",
+    [ValidateSet("keyfinder", "selected-madmom-keyfinder", "madmom-cnn-key")]
+    [string]$AnalysisKeyBackend = "keyfinder",
     [double]$MinNudgeConfidence = 0.58,
     [double]$MaxNudgeAnchorDisagreementMs = 30.0,
     [bool]$ForceAnalysis = $true,
@@ -619,7 +624,8 @@ if ($UsingExistingAnalysis) {
     $manifestWsl = To-WslPath $ManifestPath
     $analysisWsl = To-WslPath $AnalysisRoot
     $forceArg = if ($ForceAnalysis) { " --force" } else { "" }
-    Invoke-WslAnalysis "autodj-analysis analyze-batch '$manifestWsl' --out '$analysisWsl'$forceArg --section-backend dubstep-phrase-hybrid --json | tee '$analysisWsl/analyze-summary.json'"
+    Write-Host "Analyzing $($trackRows.Count) tracks with section backend '$AnalysisSectionBackend', key backend '$AnalysisKeyBackend', and $AnalysisWorkers worker(s)..."
+    Invoke-WslAnalysis "autodj-analysis analyze-batch '$manifestWsl' --out '$analysisWsl'$forceArg --section-backend '$AnalysisSectionBackend' --key-backend '$AnalysisKeyBackend' --workers $AnalysisWorkers --debug-waveform-points 32768 --json | tee '$analysisWsl/analyze-summary.json'"
 
     foreach ($row in $trackRows) {
         $trackDir = Split-Path -Parent $row.analyzedTrackPath
@@ -627,11 +633,6 @@ if ($UsingExistingAnalysis) {
         $sourceCopy = Join-Path $trackDir ("source-audio" + [System.IO.Path]::GetExtension($row.audioPath).ToLowerInvariant())
         Copy-Item -LiteralPath $row.audioPath -Destination $sourceCopy -Force
         $row.sourceAudioPath = $sourceCopy
-
-        $sourceCopyWsl = To-WslPath $sourceCopy
-        $debugWsl = To-WslPath $row.debugWaveformPath
-        Invoke-WslAnalysis "autodj-analysis debug-waveform '$sourceCopyWsl' --out '$debugWsl' --track-id '$($row.trackId)' --points 32768"
-
         $artifact = Read-JsonFile $row.analyzedTrackPath
         $row.normalizedBpm = NumberOrZero $artifact.tempo.normalizedBpm
         $row.bpmKey = "{0:0.###}" -f $(NumberOrZero $artifact.tempo.normalizedBpm)

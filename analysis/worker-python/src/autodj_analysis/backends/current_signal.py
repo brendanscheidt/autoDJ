@@ -89,9 +89,20 @@ class CurrentSignalBackend:
     ) -> "SignalAnalysisResult":
         """Decode audio and compute incumbent features for legacy artifacts."""
 
+        decoded_audio = self.load_track_audio(track)
+        return self.analyze_decoded_signal(track, identity, created_at_utc, decoded_audio)
+
+    def analyze_decoded_signal(
+        self,
+        track: RepositoryTrack,
+        identity: ArtifactIdentity,
+        created_at_utc: str,
+        decoded_audio: DecodedAudio,
+    ) -> "SignalAnalysisResult":
+        """Compute incumbent features from audio that has already been decoded."""
+
         from ..batch import SignalAnalysisResult
 
-        decoded_audio = self.load_track_audio(track)
         waveform_artifact = self._waveform_builder(
             track.track_id,
             decoded_audio,
@@ -257,15 +268,20 @@ class CurrentSignalBackend:
         *,
         created_at_utc: str | None = None,
         analyzer_producer: str = "autodj_analysis.debug_waveform",
+        target_point_count: int | None = None,
     ) -> dict[str, Any]:
         """Build the existing debug-waveform artifact shape for this backend."""
 
+        parameters: dict[str, Any] = {}
+        if target_point_count is not None:
+            parameters["target_point_count"] = target_point_count
         return self._debug_waveform_builder(
             context.track_id,
             audio,
             analyzer_producer=analyzer_producer,
             analyzer_version=self._backend_version,
             created_at_utc=created_at_utc,
+            **parameters,
         )
 
     def tempo_result_from_features(

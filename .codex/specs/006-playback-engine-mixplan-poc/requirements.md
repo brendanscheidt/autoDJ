@@ -79,7 +79,7 @@ followed by song B's drop at the expected song A drop moment.
 4. WHEN the transition reaches two measures before the aligned drop THEN
    `song_a` volume SHALL be 0 or effectively silent.
 5. WHEN the aligned drop arrives THEN `song_b` SHALL be the only full-volume
-   dry signal unless a later task explicitly enables doubles.
+   dry signal unless a later task explicitly enables layered playback.
 6. WHEN required sections have low confidence or impossible timing THEN the
    planner SHALL reject this template and record why.
 7. WHEN multiple incoming candidates are available THEN the planner SHALL scan

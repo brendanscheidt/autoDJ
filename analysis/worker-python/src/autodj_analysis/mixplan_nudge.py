@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from .canonical_audio import (
@@ -14,7 +15,8 @@ from .canonical_audio import (
     CANONICAL_TIMELINE_POLICY,
 )
 from .mixplan_renderer import LoadedAudio, _load_audio, _resolve_source_path
-from .tempo_mapping import source_nudge_for_rendered_alignment
+from .tempo_mapping import source_nudge_for_rendered_alignment, source_seconds_to_stretched_seconds
+from .tempo_stretch import TempoStretchError, TempoStretchOptions, stretch_audio_file
 
 
 class MixPlanNudgeError(ValueError):
@@ -44,6 +46,13 @@ class NudgeOptions:
     refined_anchor_reports: tuple[Path, ...] = ()
     use_refined_anchors: bool = False
     refined_anchor_match_seconds: float = 0.50
+    prove_rendered_alignment: bool = False
+    max_rendered_alignment_correction_seconds: float = 0.030
+    max_rendered_probe_residual_seconds: float = 999.0
+    min_rendered_alignment_probes: int = 3
+    tempo_stretch_backend: str = "soundstretch"
+    tempo_stretch_quality: str = "standard"
+    ffmpeg_path: str = "ffmpeg"
 
 
 @dataclass(frozen=True)
@@ -141,6 +150,82 @@ class MicroAlignment:
 
 
 @dataclass(frozen=True)
+class RenderedAlignmentProbe:
+    label: str
+    progress: float
+    outgoing_timeline_seconds: float
+    incoming_timeline_seconds: float
+    residual_seconds: float
+    confidence: float
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "label": self.label,
+            "progress": self.progress,
+            "outgoingTimelineSeconds": self.outgoing_timeline_seconds,
+            "incomingTimelineSeconds": self.incoming_timeline_seconds,
+            "residualSeconds": self.residual_seconds,
+            "residualMilliseconds": self.residual_seconds * 1000.0,
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class RenderedAlignmentProof:
+    outgoing_timeline_seconds: float
+    incoming_timeline_seconds_before_correction: float
+    incoming_timeline_seconds_after_correction: float
+    residual_before_correction_seconds: float
+    residual_after_correction_seconds: float
+    correction_source_seconds: float
+    correction_timeline_seconds: float
+    confidence: float
+    outgoing_peak_offset_seconds: float
+    incoming_peak_offset_seconds: float
+    outgoing_tempo_ratio: float
+    incoming_tempo_ratio: float
+    outgoing_audio_source: str
+    incoming_audio_source: str
+    probes: tuple[RenderedAlignmentProbe, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "ok": True,
+            "outgoingTimelineSeconds": self.outgoing_timeline_seconds,
+            "incomingTimelineSecondsBeforeCorrection": self.incoming_timeline_seconds_before_correction,
+            "incomingTimelineSecondsAfterCorrection": self.incoming_timeline_seconds_after_correction,
+            "residualBeforeCorrectionSeconds": self.residual_before_correction_seconds,
+            "residualBeforeCorrectionMilliseconds": self.residual_before_correction_seconds * 1000.0,
+            "residualAfterCorrectionSeconds": self.residual_after_correction_seconds,
+            "residualAfterCorrectionMilliseconds": self.residual_after_correction_seconds * 1000.0,
+            "correctionSourceSeconds": self.correction_source_seconds,
+            "correctionSourceMilliseconds": self.correction_source_seconds * 1000.0,
+            "correctionTimelineSeconds": self.correction_timeline_seconds,
+            "correctionTimelineMilliseconds": self.correction_timeline_seconds * 1000.0,
+            "confidence": self.confidence,
+            "outgoingPeakOffsetSeconds": self.outgoing_peak_offset_seconds,
+            "outgoingPeakOffsetMilliseconds": self.outgoing_peak_offset_seconds * 1000.0,
+            "incomingPeakOffsetSeconds": self.incoming_peak_offset_seconds,
+            "incomingPeakOffsetMilliseconds": self.incoming_peak_offset_seconds * 1000.0,
+            "outgoingTempoRatio": self.outgoing_tempo_ratio,
+            "incomingTempoRatio": self.incoming_tempo_ratio,
+            "outgoingAudioSource": self.outgoing_audio_source,
+            "incomingAudioSource": self.incoming_audio_source,
+            "probeCount": len(self.probes),
+            "maxProbeResidualMilliseconds": (
+                max(abs(probe.residual_seconds) for probe in self.probes) * 1000.0 if self.probes else None
+            ),
+            "probeResidualDriftMilliseconds": (
+                (max(probe.residual_seconds for probe in self.probes) - min(probe.residual_seconds for probe in self.probes))
+                * 1000.0
+                if self.probes
+                else None
+            ),
+            "probes": [probe.to_dict() for probe in self.probes],
+        }
+
+
+@dataclass(frozen=True)
 class AnchorNudge:
     anchor_pair: str
     anchor_mode: str
@@ -197,10 +282,11 @@ class NudgeResult:
     raw_anchor_nudges: tuple[AnchorNudge, ...] = ()
     refined_anchor_nudges: tuple[AnchorNudge, ...] = ()
     refined_anchor_reason: str = ""
+    rendered_alignment_proof: RenderedAlignmentProof | None = None
     audio_sources: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload = {
             "ok": True,
             "artifact": "mixplan-transient-nudge",
             "outputMixPlan": str(self.output_mix_plan),
@@ -222,6 +308,9 @@ class NudgeResult:
                 "refinedAnchorNudges": [anchor.to_dict() for anchor in self.refined_anchor_nudges],
             },
         }
+        if self.rendered_alignment_proof is not None:
+            payload["renderedAlignmentProof"] = self.rendered_alignment_proof.to_dict()
+        return payload
 
 
 def nudge_mix_plan_file(
@@ -247,6 +336,10 @@ def nudge_mix_plan_file(
         raise MixPlanNudgeError("invalid_nudge_options", "Micro-alignment limits must be valid")
     if options.refined_anchor_match_seconds <= 0.0:
         raise MixPlanNudgeError("invalid_nudge_options", "Refined anchor match tolerance must be positive")
+    if options.max_rendered_alignment_correction_seconds < 0.0:
+        raise MixPlanNudgeError("invalid_nudge_options", "Rendered alignment correction limit must be non-negative")
+    if options.max_rendered_probe_residual_seconds < 0.0 or options.min_rendered_alignment_probes < 1:
+        raise MixPlanNudgeError("invalid_nudge_options", "Rendered alignment probe limits must be valid")
     if not mix_plan_path.exists():
         raise MixPlanNudgeError("mix_plan_missing", f"MixPlan file does not exist: {mix_plan_path}")
 
@@ -337,6 +430,19 @@ def nudge_mix_plan(
         incoming_track_id=incoming_track_id,
         nudge_seconds=nudge_seconds,
     )
+    rendered_alignment_proof: RenderedAlignmentProof | None = None
+    if options.prove_rendered_alignment:
+        rendered_alignment_proof = _prove_rendered_alignment(
+            plan,
+            transition,
+            from_placement,
+            to_placement,
+            assets,
+            mix_plan_path=mix_plan_path,
+            incoming_track_id=incoming_track_id,
+            options=options,
+        )
+        adjusted_nudge_seconds += rendered_alignment_proof.correction_source_seconds
     confidence = sum(anchor.confidence for anchor in anchor_nudges) / len(anchor_nudges)
     prominence_confidence = min(anchor.prominence_confidence for anchor in anchor_nudges)
 
@@ -367,6 +473,7 @@ def nudge_mix_plan(
         raw_anchor_nudges=raw_anchor_nudges,
         refined_anchor_nudges=refined_anchor_nudges,
         refined_anchor_reason=refined_anchor_reason,
+        rendered_alignment_proof=rendered_alignment_proof,
         audio_sources=(
             _audio_source_report(outgoing_track_id, outgoing_audio),
             _audio_source_report(incoming_track_id, incoming_audio),
@@ -1062,6 +1169,306 @@ def _append_nudge_annotation(
             ),
         }
     )
+
+
+@dataclass(frozen=True)
+class _RenderedAnchorTimeline:
+    timeline_seconds: float
+    peak_offset_seconds: float
+    peak_confidence: float
+    tempo_ratio: float
+    audio_source: str
+
+
+def _prove_rendered_alignment(
+    plan: dict[str, Any],
+    transition: dict[str, Any],
+    from_placement: dict[str, Any],
+    to_placement: dict[str, Any],
+    assets: dict[str, dict[str, Any]],
+    *,
+    mix_plan_path: Path,
+    incoming_track_id: str,
+    options: NudgeOptions,
+) -> RenderedAlignmentProof:
+    outgoing_anchor_name, incoming_anchor_name = _anchor_pair_names(transition)
+    anchors = transition.get("sourceAnchors", {})
+    if not isinstance(anchors, dict):
+        raise MixPlanNudgeError("missing_source_anchors", "Transition sourceAnchors must be an object")
+    outgoing_anchor = anchors.get(outgoing_anchor_name)
+    incoming_anchor = anchors.get(incoming_anchor_name)
+    if not isinstance(outgoing_anchor, dict) or not isinstance(incoming_anchor, dict):
+        raise MixPlanNudgeError("missing_source_anchors", "Transition is missing drop alignment source anchors")
+    outgoing_source_seconds = _optional_number(outgoing_anchor, "sourceSeconds")
+    incoming_source_seconds = _optional_number(incoming_anchor, "sourceSeconds")
+    if outgoing_source_seconds is None or incoming_source_seconds is None:
+        raise MixPlanNudgeError("missing_source_anchor_time", "Drop alignment source anchors need sourceSeconds")
+
+    with tempfile.TemporaryDirectory(prefix="autodj-rendered-nudge-") as temp_dir:
+        temp_root = Path(temp_dir)
+        outgoing_rendered = _rendered_anchor_timeline(
+            from_placement,
+            assets,
+            outgoing_source_seconds,
+            mix_plan_path=mix_plan_path,
+            temp_root=temp_root,
+            options=options,
+        )
+        incoming_before = _rendered_anchor_timeline(
+            to_placement,
+            assets,
+            incoming_source_seconds,
+            mix_plan_path=mix_plan_path,
+            temp_root=temp_root,
+            options=options,
+        )
+        probes_before_correction = _rendered_alignment_probes(
+            transition,
+            from_placement,
+            to_placement,
+            assets,
+            mix_plan_path=mix_plan_path,
+            temp_root=temp_root,
+            incoming_correction_timeline_seconds=0.0,
+            options=options,
+        )
+
+    residual_before = incoming_before.timeline_seconds - outgoing_rendered.timeline_seconds
+    correction_source_seconds = residual_before * incoming_before.tempo_ratio
+    if abs(correction_source_seconds) > options.max_rendered_alignment_correction_seconds:
+        raise MixPlanNudgeError(
+            "rendered_alignment_correction_too_large",
+            (
+                "Rendered-domain transient proof required "
+                f"{correction_source_seconds * 1000.0:.1f} ms source correction, "
+                f"over the {options.max_rendered_alignment_correction_seconds * 1000.0:.1f} ms limit"
+            ),
+        )
+    adjusted_correction = _apply_incoming_nudge(
+        plan,
+        to_placement,
+        incoming_track_id=incoming_track_id,
+        nudge_seconds=correction_source_seconds,
+    )
+    correction_timeline_seconds = adjusted_correction / incoming_before.tempo_ratio
+    incoming_after_timeline = incoming_before.timeline_seconds - correction_timeline_seconds
+    residual_after = incoming_after_timeline - outgoing_rendered.timeline_seconds
+    probes = tuple(
+        RenderedAlignmentProbe(
+            label=probe.label,
+            progress=probe.progress,
+            outgoing_timeline_seconds=probe.outgoing_timeline_seconds,
+            incoming_timeline_seconds=probe.incoming_timeline_seconds - correction_timeline_seconds,
+            residual_seconds=probe.residual_seconds - correction_timeline_seconds,
+            confidence=probe.confidence,
+        )
+        for probe in probes_before_correction
+    )
+    if len(probes) < options.min_rendered_alignment_probes:
+        raise MixPlanNudgeError(
+            "rendered_alignment_too_few_probes",
+            f"Rendered-domain proof found {len(probes)} usable beat probes; need {options.min_rendered_alignment_probes}",
+        )
+    max_probe_residual = max(abs(probe.residual_seconds) for probe in probes)
+    if (
+        options.max_rendered_probe_residual_seconds > 0.0
+        and max_probe_residual > options.max_rendered_probe_residual_seconds
+    ):
+        raise MixPlanNudgeError(
+            "rendered_alignment_probe_drift",
+            (
+                "Rendered-domain beat probes drift by "
+                f"{max_probe_residual * 1000.0:.1f} ms, over the "
+                f"{options.max_rendered_probe_residual_seconds * 1000.0:.1f} ms limit"
+            ),
+        )
+    confidence = math.sqrt(
+        max(0.0, outgoing_rendered.peak_confidence) * max(0.0, incoming_before.peak_confidence)
+    )
+    return RenderedAlignmentProof(
+        outgoing_timeline_seconds=outgoing_rendered.timeline_seconds,
+        incoming_timeline_seconds_before_correction=incoming_before.timeline_seconds,
+        incoming_timeline_seconds_after_correction=incoming_after_timeline,
+        residual_before_correction_seconds=residual_before,
+        residual_after_correction_seconds=residual_after,
+        correction_source_seconds=adjusted_correction,
+        correction_timeline_seconds=correction_timeline_seconds,
+        confidence=confidence,
+        outgoing_peak_offset_seconds=outgoing_rendered.peak_offset_seconds,
+        incoming_peak_offset_seconds=incoming_before.peak_offset_seconds,
+        outgoing_tempo_ratio=outgoing_rendered.tempo_ratio,
+        incoming_tempo_ratio=incoming_before.tempo_ratio,
+        outgoing_audio_source=outgoing_rendered.audio_source,
+        incoming_audio_source=incoming_before.audio_source,
+        probes=probes,
+    )
+
+
+def _rendered_anchor_timeline(
+    placement: dict[str, Any],
+    assets: dict[str, dict[str, Any]],
+    source_anchor_seconds: float,
+    *,
+    mix_plan_path: Path,
+    temp_root: Path,
+    options: NudgeOptions,
+) -> _RenderedAnchorTimeline:
+    track_id = _required_string(placement, "trackId")
+    audio, ratio = _load_rendered_plan_audio(
+        track_id,
+        placement,
+        assets,
+        mix_plan_path=mix_plan_path,
+        temp_root=temp_root,
+        options=options,
+    )
+    rendered_anchor_seconds = source_seconds_to_stretched_seconds(source_anchor_seconds, tempo_ratio=ratio)
+    peak = _nearest_transient(audio, rendered_anchor_seconds, options=options)
+    if peak is None:
+        raise MixPlanNudgeError("rendered_alignment_no_peak", f"No rendered-domain transient found for {track_id}")
+    rendered_source_start = source_seconds_to_stretched_seconds(
+        _number(placement, "sourceStartSeconds"),
+        tempo_ratio=ratio,
+    )
+    timeline_seconds = (
+        _number(placement, "timelineStartSeconds")
+        + rendered_anchor_seconds
+        + peak.offset_seconds
+        - rendered_source_start
+    )
+    return _RenderedAnchorTimeline(
+        timeline_seconds=timeline_seconds,
+        peak_offset_seconds=peak.offset_seconds,
+        peak_confidence=peak.confidence,
+        tempo_ratio=ratio,
+        audio_source=str(audio.source_path),
+    )
+
+
+def _rendered_alignment_probes(
+    transition: dict[str, Any],
+    from_placement: dict[str, Any],
+    to_placement: dict[str, Any],
+    assets: dict[str, dict[str, Any]],
+    *,
+    mix_plan_path: Path,
+    temp_root: Path,
+    incoming_correction_timeline_seconds: float,
+    options: NudgeOptions,
+) -> tuple[RenderedAlignmentProbe, ...]:
+    anchors = transition.get("sourceAnchors", {})
+    if not isinstance(anchors, dict):
+        return ()
+    from_build = _anchor_source_seconds(anchors, "fromBuildStart")
+    from_drop = _anchor_source_seconds(anchors, "fromDropStart")
+    to_build = _anchor_source_seconds(anchors, "toBuildStart")
+    to_drop = _anchor_source_seconds(anchors, "toDropStart")
+    if None in (from_build, from_drop, to_build, to_drop):
+        return ()
+
+    probes: list[RenderedAlignmentProbe] = []
+    for label, progress in (
+        ("build_start", 0.0),
+        ("quarter_build", 0.25),
+        ("mid_build", 0.50),
+        ("three_quarter_build", 0.75),
+        ("drop", 1.0),
+    ):
+        outgoing_source = float(from_build) + (float(from_drop) - float(from_build)) * progress
+        incoming_source = float(to_build) + (float(to_drop) - float(to_build)) * progress
+        try:
+            outgoing = _rendered_anchor_timeline(
+                from_placement,
+                assets,
+                outgoing_source,
+                mix_plan_path=mix_plan_path,
+                temp_root=temp_root,
+                options=options,
+            )
+            incoming = _rendered_anchor_timeline(
+                to_placement,
+                assets,
+                incoming_source,
+                mix_plan_path=mix_plan_path,
+                temp_root=temp_root,
+                options=options,
+            )
+        except MixPlanNudgeError:
+            continue
+        incoming_timeline = incoming.timeline_seconds - incoming_correction_timeline_seconds
+        probes.append(
+            RenderedAlignmentProbe(
+                label=label,
+                progress=progress,
+                outgoing_timeline_seconds=outgoing.timeline_seconds,
+                incoming_timeline_seconds=incoming_timeline,
+                residual_seconds=incoming_timeline - outgoing.timeline_seconds,
+                confidence=math.sqrt(max(0.0, outgoing.peak_confidence) * max(0.0, incoming.peak_confidence)),
+            )
+        )
+    return tuple(probes)
+
+
+def _anchor_source_seconds(anchors: dict[str, Any], name: str) -> float | None:
+    anchor = anchors.get(name)
+    if not isinstance(anchor, dict):
+        return None
+    return _optional_number(anchor, "sourceSeconds")
+
+
+def _load_rendered_plan_audio(
+    track_id: str,
+    placement: dict[str, Any],
+    assets: dict[str, dict[str, Any]],
+    *,
+    mix_plan_path: Path,
+    temp_root: Path,
+    options: NudgeOptions,
+) -> tuple[LoadedAudio, float]:
+    ratio = _tempo_ratio_from_placement(placement)
+    if math.isclose(ratio, 1.0, rel_tol=0.0, abs_tol=0.000001):
+        return _load_plan_audio(track_id, assets, mix_plan_path=mix_plan_path, options=options), 1.0
+
+    asset = assets.get(track_id)
+    if asset is None:
+        raise MixPlanNudgeError("missing_asset", f"MixPlan has no asset entry for trackId: {track_id}")
+    source_uri = _required_string(asset, "sourceUri")
+    source_path = _resolve_source_path(source_uri, mix_plan_path=mix_plan_path, asset_root=options.asset_root)
+    tempo_plan = placement.get("tempoPlan")
+    if not isinstance(tempo_plan, dict):
+        raise MixPlanNudgeError("invalid_tempo_plan", "tempoPlan must be an object for rendered alignment proof")
+    source_bpm = _optional_number(tempo_plan, "sourceBpm")
+    target_bpm = _optional_number(tempo_plan, "targetBpm")
+    if source_bpm is None or target_bpm is None:
+        raise MixPlanNudgeError("invalid_tempo_plan", "tempoPlan requires sourceBpm and targetBpm for rendered proof")
+    target_bpm_bias = float(tempo_plan.get("targetBpmBias", 0.0) or 0.0)
+    rendered_path = temp_root / f"{_safe_temp_name(track_id)}-rendered.wav"
+    if not rendered_path.exists():
+        try:
+            stretch_audio_file(
+                source_path,
+                rendered_path,
+                options=TempoStretchOptions(
+                    source_bpm=source_bpm,
+                    target_bpm=target_bpm,
+                    backend=str(tempo_plan.get("backend") or options.tempo_stretch_backend),
+                    sample_rate=options.sample_rate,
+                    quality=str(tempo_plan.get("quality") or options.tempo_stretch_quality),
+                    preserve_pitch=True,
+                    target_bpm_bias=target_bpm_bias,
+                    ffmpeg_path=options.ffmpeg_path,
+                ),
+            )
+        except TempoStretchError as exc:
+            raise MixPlanNudgeError(exc.code, exc.message) from exc
+    return _load_audio(rendered_path, sample_rate=options.sample_rate), ratio
+
+
+def _safe_temp_name(value: str) -> str:
+    cleaned = "".join(character.lower() if character.isalnum() else "-" for character in value)
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned.strip("-") or "track"
 
 
 def _load_plan_audio(

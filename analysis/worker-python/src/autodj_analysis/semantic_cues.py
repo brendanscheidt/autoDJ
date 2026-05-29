@@ -33,20 +33,25 @@ class SemanticCueBoundary:
 
 
 def parse_semantic_cue_label(name: str, *, provider_name: str = "manual") -> ParsedSemanticCueLabel | None:
-    """Parse labels like ``drop_1_start`` or ``build_2_end``.
+    """Parse labels like ``drop_1_start``, ``build_2_end``, or ``build_2``.
 
     Rekordbox exposes hot cue names as free text. AutoDJ treats names that end
-    in ``_start`` or ``_end`` as semantic section boundaries and leaves unnamed
-    hot cues to legacy import code.
+    in ``_start`` or ``_end`` as semantic section boundaries. Labels shaped
+    like ``section_ordinal`` are treated as start boundaries so Rekordbox hot
+    cues can stay concise.
     """
 
     parts = [part for part in name.strip().lower().split("_") if part]
     if len(parts) < 2:
         return None
     boundary = parts[-1]
-    if boundary not in SEMANTIC_CUE_BOUNDARIES:
+    if boundary in SEMANTIC_CUE_BOUNDARIES:
+        label_parts = parts[:-1]
+    elif boundary.isdigit():
+        boundary = "start"
+        label_parts = parts
+    else:
         return None
-    label_parts = parts[:-1]
     ordinal = None
     if label_parts and label_parts[-1].isdigit():
         ordinal = int(label_parts[-1])

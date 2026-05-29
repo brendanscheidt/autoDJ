@@ -87,12 +87,16 @@ class _KeyBackend:
         return self._result
 
 
+class _UnexpectedKeyBackend:
+    def analyze_key(self, audio, context):
+        raise AssertionError("key backend should not run")
+
+
 def test_selected_key_backend_uses_confident_madmom_result() -> None:
     madmom = _key_result("madmom-cnn-key", "9A", SELECTED_KEY_MADMOM_CONFIDENCE_THRESHOLD)
-    keyfinder = _key_result("keyfinder", "11A", 0.65)
     backend = SelectedKeyBackend(
         madmom_backend_factory=lambda: _KeyBackend(madmom),
-        keyfinder_backend_factory=lambda: _KeyBackend(keyfinder),
+        keyfinder_backend_factory=_UnexpectedKeyBackend,
     )
 
     result = backend.analyze_key(_audio(), _context())
@@ -102,7 +106,8 @@ def test_selected_key_backend_uses_confident_madmom_result() -> None:
     assert result.provenance.backend_name == SELECTED_KEY_BACKEND
     assert result.provenance.parameters["selectedBackend"] == "madmom-cnn-key"
     assert result.provenance.parameters["madmomConfidenceThreshold"] == SELECTED_KEY_MADMOM_CONFIDENCE_THRESHOLD
-    assert [candidate.camelot for candidate in result.candidates[:2]] == ["9A", "11A"]
+    assert [candidate.camelot for candidate in result.candidates] == ["9A"]
+    assert result.provenance.parameters["keyfinder"]["status"] == "deferred"
 
 
 def test_selected_key_backend_falls_back_to_keyfinder_when_madmom_confidence_is_low() -> None:

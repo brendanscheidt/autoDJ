@@ -96,43 +96,6 @@ action: b.volume at midpoint(b_start, b_drop) = 1 smooth
     assert payload["automation"]["b"]["volume"][1]["timeExpression"] == "midpoint(b_start, b_drop)"
 
 
-def test_parse_specific_double_drop_sheet_accepts_friendly_reverb_alias(tmp_path: Path) -> None:
-    template_path = tmp_path / "double-drop.transition.txt"
-    template_path.write_text(
-        """
-kind: specific_transition
-type: double_drop
-plan_id: double-drop-test
-transition_id: double-drop
-bpm: 140
-song_a.track_id: as-i-do
-song_a.file: C:/Music/as-i-do.mp3
-song_a.play_from: 1.1
-song_a.build_start: 45.1
-song_a.drop_start: 61.1
-song_a.cut_at: 85.1
-song_a.end_at: 85.1
-song_b.track_id: shock-therapy
-song_b.file: "C:/Music/shock-therapy.mp3"
-song_b.play_from: 1.1
-song_b.drop_start: 17.1
-song_b.end_at: 49.1
-action: a.reverb at 77.1 = 1 smooth
-action: b.volume at 1.1 = 0 instant
-""",
-        encoding="utf-8",
-    )
-
-    result = parse_transition_template_file(template_path, tmp_path / "mix-plan.json")
-
-    payload = json.loads(result.output_path.read_text(encoding="utf-8"))
-    assert result.artifact == "mix-plan"
-    assert payload["transitions"][0]["technique"] == "double_drop"
-    assert payload["assets"][1]["sourceUri"] == "C:/Music/shock-therapy.mp3"
-    reverb_command = next(command for command in payload["commands"] if command.get("control") == "reverbWet")
-    assert reverb_command["deck"] == 1
-
-
 def test_equals_style_transition_files_are_not_supported(tmp_path: Path) -> None:
     template_path = tmp_path / "old-style.transition.txt"
     template_path.write_text('kind = "specific_transition"\n', encoding="utf-8")

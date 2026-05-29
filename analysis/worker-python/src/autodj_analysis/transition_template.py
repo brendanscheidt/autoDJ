@@ -121,14 +121,14 @@ def build_mix_plan_from_template(template: dict[str, Any]) -> dict[str, Any]:
     beats_per_bar = _beats_per_bar(fields)
     measure_seconds = beats_per_bar * 60.0 / bpm
 
-    if family in {"drop_switch", "double_drop"}:
+    if family == "drop_switch":
         timings, transition, source_anchors = _drop_switch_context(fields, bpm=bpm, beats_per_bar=beats_per_bar)
     elif family == "reverb_exit":
         timings, transition, source_anchors = _reverb_exit_context(fields, bpm=bpm, beats_per_bar=beats_per_bar)
     else:
         raise TransitionTemplateError(
             "unsupported_transition_type",
-            "Specific transition type must be 'drop_switch', 'double_drop', or 'reverb_exit'",
+            "Specific transition type must be 'drop_switch' or 'reverb_exit'",
         )
 
     deck_a = timings["a"]
@@ -348,14 +348,12 @@ def _drop_switch_context(
     }
     transition_id = _field(fields, "transition_id", _field(fields, "id", f"manual-drop-switch-{_timestamp_id()}"))
     family = _transition_family(fields)
-    technique = "double_drop" if family == "double_drop" else "build_to_drop_swap"
-    default_template_id = "manual_double_drop_barbeat_v1" if family == "double_drop" else "manual_drop_switch_barbeat_v1"
     transition = {
         "transitionId": transition_id,
         "fromPlacementId": "place-a",
         "toPlacementId": "place-b",
-        "technique": technique,
-        "templateId": _field(fields, "template_id", default_template_id),
+        "technique": "build_to_drop_swap",
+        "templateId": _field(fields, "template_id", "manual_drop_switch_barbeat_v1"),
         "timelineStartSeconds": _round(transition_start),
         "timelineEndSeconds": _round(transition_end),
         "handoffTimelineSeconds": _round(a_cut - a_source_start),

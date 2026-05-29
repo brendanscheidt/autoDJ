@@ -2,6 +2,8 @@ import json
 import importlib.util
 from pathlib import Path
 import subprocess
+import threading
+import time
 
 import pytest
 
@@ -643,6 +645,38 @@ def test_artifact_identity_for_track_matches_batch_defaults() -> None:
     assert identity.parameters_hash == DEFAULT_PARAMETERS_HASH
 
 
+def test_analyze_repository_manifest_cache_hash_includes_non_default_section_backend(tmp_path: Path) -> None:
+    manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
+    cache_root = tmp_path / ".autodj-cache"
+
+    analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload()),
+        signal_analyzer=_signal_analyzer(),
+        section_backend="current-autodj-signal",
+    )
+
+    artifact = json.loads(analyzed_track_path(cache_root, "track-a").read_text(encoding="utf-8"))
+    assert artifact["analyzer"]["parametersHash"].endswith("+section-backend-current-autodj-signal")
+
+
+def test_analyze_repository_manifest_cache_hash_includes_non_default_key_backend(tmp_path: Path) -> None:
+    manifest_path = _write_manifest(tmp_path, [{"track_id": "track-a", "content_hash": "sha256:a"}])
+    cache_root = tmp_path / ".autodj-cache"
+
+    analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload()),
+        signal_analyzer=_signal_analyzer(),
+        key_backend="keyfinder",
+    )
+
+    artifact = json.loads(analyzed_track_path(cache_root, "track-a").read_text(encoding="utf-8"))
+    assert artifact["analyzer"]["parametersHash"].endswith("+key-backend-keyfinder")
+
+
 def test_analyze_repository_manifest_analyzes_all_tracks_and_writes_artifacts(tmp_path: Path) -> None:
     manifest_path = _write_manifest(
         tmp_path,
@@ -694,6 +728,57 @@ def test_analyze_repository_manifest_analyzes_all_tracks_and_writes_artifacts(tm
     assert summary["totalTracks"] == 2
     assert summary["tracks"][0]["artifactPath"] == str(analyzed_track_path(cache_root, "track-a"))
     assert summary["tracks"][0]["waveformPath"] == str(waveform_path(cache_root, "track-a"))
+
+
+def test_analyze_repository_manifest_parallel_workers_preserve_manifest_order(tmp_path: Path) -> None:
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {"track_id": "track-a", "content_hash": "sha256:a"},
+            {"track_id": "track-b", "content_hash": "sha256:b"},
+            {"track_id": "track-c", "content_hash": "sha256:c"},
+        ],
+    )
+    cache_root = tmp_path / ".autodj-cache"
+    seen_signals: list[str] = []
+    seen_lock = threading.Lock()
+
+    def analyzer(track, identity, created_at_utc):
+        if track.track_id == "track-a":
+            time.sleep(0.03)
+        with seen_lock:
+            seen_signals.append(track.track_id)
+        if track.track_id == "track-b":
+            raise AudioLoadError(
+                "audio_decode_error",
+                "Could not decode audio source: synthetic failure",
+                source_uri=track.source_uri,
+                track_id=track.track_id,
+            )
+        return _signal_result(
+            track.track_id,
+            identity.source_content_hash or "",
+            identity.parameters_hash or "",
+            created_at_utc,
+            waveform_peak=0.8,
+        )
+
+    result = analyze_repository_manifest(
+        manifest_path,
+        cache_root,
+        probe_runner=_runner(_ffprobe_payload()),
+        signal_analyzer=analyzer,
+        workers=3,
+    )
+
+    assert result.ok is False
+    assert [track.track_id for track in result.tracks] == ["track-a", "track-b", "track-c"]
+    assert [track.status for track in result.tracks] == ["analyzed", "failed", "analyzed"]
+    assert {track_id for track_id in seen_signals} == {"track-a", "track-b", "track-c"}
+    assert analyzed_track_path(cache_root, "track-a").exists()
+    assert analyzed_track_path(cache_root, "track-c").exists()
+    assert result.tracks[1].error is not None
+    assert result.tracks[1].error["code"] == "audio_decode_error"
 
 
 def test_analyze_repository_manifest_skips_current_artifacts_without_probing(tmp_path: Path) -> None:
@@ -908,10 +993,13 @@ def test_analyze_repository_manifest_runs_real_signal_analysis_for_generated_aud
                 channels=1,
             )
         ),
+        section_backend="current-autodj-signal",
+        debug_waveform_points=64,
     )
 
     artifact = json.loads(analyzed_track_path(cache_root, "track-ramp").read_text(encoding="utf-8"))
     waveform = json.loads(waveform_path(cache_root, "track-ramp").read_text(encoding="utf-8"))
+    debug_waveform = json.loads((cache_root / "tracks" / "track-ramp" / "debug-waveform.json").read_text(encoding="utf-8"))
 
     assert result.ok is True
     assert result.analyzed == 1
@@ -924,6 +1012,9 @@ def test_analyze_repository_manifest_runs_real_signal_analysis_for_generated_aud
     assert any(cue["type"] == "drop" for cue in artifact["cuePoints"])
     assert waveform["trackId"] == "track-ramp"
     assert waveform["points"]
+    assert debug_waveform["artifactType"] == "debug-waveform"
+    assert debug_waveform["parameters"]["targetPointCount"] == 64
+    assert debug_waveform["points"]
     assert result.to_dict()["tracks"][0]["waveformPath"] == str(waveform_path(cache_root, "track-ramp"))
 
 

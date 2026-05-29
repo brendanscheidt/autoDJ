@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+import time
 from typing import Any, Callable
 
 from . import __version__
@@ -21,6 +23,8 @@ from .backends.base import (
 )
 from .backends.current_signal import CURRENT_SIGNAL_BACKEND
 from .backends.dubstep_phrase_hybrid import DUBSTEP_PHRASE_HYBRID_BACKEND, DubstepPhraseHybridBackend
+from .backends.keyfinder_key import KEYFINDER_KEY_BACKEND, KeyFinderKeyBackend
+from .backends.madmom_key import MADMOM_KEY_BACKEND, MadmomKeyBackend
 from .backends.selected_key import SELECTED_KEY_BACKEND, SelectedKeyBackend
 from .cache import (
     ArtifactIdentity,
@@ -51,6 +55,7 @@ ANALYZER_PRODUCER = "autodj_analysis.signal"
 ANALYZER_VERSION = __version__
 SELECTED_SECTION_BACKEND = DUBSTEP_PHRASE_HYBRID_BACKEND
 DEFAULT_PARAMETERS_HASH = "sha256:signal-v3-waveform-energy-tempo-key-dubstep-phrase-hybrid-v1"
+DEFAULT_KEY_ANALYSIS_EXCERPT_SECONDS = 60.0
 FFPROBE_ONLY_WARNING = (
     "Only FFprobe container/stream metadata was analyzed; BPM, key, beat grid, "
     "sections, energy, vocals, stems, and cue points are low-confidence placeholders."
@@ -73,6 +78,7 @@ class SignalAnalysisResult:
     structure_features: StructureFeatures
     key_result: KeyCandidateResult | None = None
     section_result: SectionCandidateResult | None = None
+    debug_waveform_artifact: dict[str, Any] | None = None
 
 
 SignalAnalyzer = Callable[[RepositoryTrack, ArtifactIdentity, str], SignalAnalysisResult]
@@ -88,6 +94,7 @@ class BatchTrackResult:
     reason: str | None = None
     message: str | None = None
     error: dict[str, str] | None = None
+    processing_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -104,6 +111,8 @@ class BatchTrackResult:
             payload["message"] = self.message
         if self.error is not None:
             payload["error"] = dict(self.error)
+        if self.processing_seconds is not None:
+            payload["processingSeconds"] = self.processing_seconds
         return payload
 
 
@@ -117,6 +126,11 @@ class BatchAnalysisResult:
     failed: int
     tracks: tuple[BatchTrackResult, ...]
     errors: tuple[dict[str, str], ...]
+    processing_seconds: float = 0.0
+    workers: int = 1
+    section_backend: str = SELECTED_SECTION_BACKEND
+    key_backend: str = SELECTED_KEY_BACKEND
+    debug_waveform_points: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -132,6 +146,11 @@ class BatchAnalysisResult:
             "analyzed": self.analyzed,
             "skipped": self.skipped,
             "failed": self.failed,
+            "processingSeconds": self.processing_seconds,
+            "workers": self.workers,
+            "sectionBackend": self.section_backend,
+            "keyBackend": self.key_backend,
+            "debugWaveformPoints": self.debug_waveform_points,
             "tracks": [track.to_dict() for track in self.tracks],
             "errors": [dict(error) for error in self.errors],
         }
@@ -147,8 +166,11 @@ def analyze_repository_manifest(
     probe_runner: ProbeRunner | None = None,
     signal_analyzer: SignalAnalyzer | None = None,
     section_backend: str = SELECTED_SECTION_BACKEND,
+    key_backend: str = SELECTED_KEY_BACKEND,
     section_backend_factory: SectionBackendFactory | None = None,
     canonical_audio_root: str | Path | None = None,
+    workers: int = 1,
+    debug_waveform_points: int | None = None,
 ) -> BatchAnalysisResult:
     """Load a repository manifest and analyze each track into the cache root."""
 
@@ -162,8 +184,11 @@ def analyze_repository_manifest(
         probe_runner=probe_runner,
         signal_analyzer=signal_analyzer,
         section_backend=section_backend,
+        key_backend=key_backend,
         section_backend_factory=section_backend_factory,
         canonical_audio_root=canonical_audio_root,
+        workers=workers,
+        debug_waveform_points=debug_waveform_points,
     )
 
 
@@ -177,8 +202,11 @@ def analyze_manifest(
     probe_runner: ProbeRunner | None = None,
     signal_analyzer: SignalAnalyzer | None = None,
     section_backend: str = SELECTED_SECTION_BACKEND,
+    key_backend: str = SELECTED_KEY_BACKEND,
     section_backend_factory: SectionBackendFactory | None = None,
     canonical_audio_root: str | Path | None = None,
+    workers: int = 1,
+    debug_waveform_points: int | None = None,
 ) -> BatchAnalysisResult:
     """Analyze every track from a parsed repository manifest.
 
@@ -188,25 +216,28 @@ def analyze_manifest(
     """
 
     cache_root_path = Path(cache_root)
+    started_at = time.perf_counter()
     canonical_audio_root_path = Path(canonical_audio_root) if canonical_audio_root is not None else None
     effective_parameters_hash = _effective_parameters_hash(
         parameters_hash,
+        section_backend=section_backend,
+        key_backend=key_backend,
         canonical_audio_root=canonical_audio_root_path,
     )
-    tracks = tuple(
-        _analyze_manifest_track(
-            track,
-            cache_root_path,
-            ffprobe_path=ffprobe_path,
-            force=force,
-            parameters_hash=effective_parameters_hash,
-            probe_runner=probe_runner,
-            signal_analyzer=signal_analyzer,
-            section_backend=section_backend,
-            section_backend_factory=section_backend_factory,
-            canonical_audio_root=canonical_audio_root_path,
-        )
-        for track in manifest.tracks
+    tracks = _analyze_manifest_tracks(
+        manifest.tracks,
+        cache_root_path,
+        ffprobe_path=ffprobe_path,
+        force=force,
+        parameters_hash=effective_parameters_hash,
+        probe_runner=probe_runner,
+        signal_analyzer=signal_analyzer,
+        section_backend=section_backend,
+        key_backend=key_backend,
+        section_backend_factory=section_backend_factory,
+        canonical_audio_root=canonical_audio_root_path,
+        workers=workers,
+        debug_waveform_points=debug_waveform_points,
     )
     errors = tuple(track.error for track in tracks if track.error is not None)
 
@@ -219,7 +250,74 @@ def analyze_manifest(
         failed=sum(track.status == TRACK_STATUS_FAILED for track in tracks),
         tracks=tracks,
         errors=errors,
+        processing_seconds=_elapsed(started_at),
+        workers=max(1, int(workers)),
+        section_backend=section_backend,
+        key_backend=key_backend,
+        debug_waveform_points=debug_waveform_points,
     )
+
+
+def _analyze_manifest_tracks(
+    tracks: tuple[RepositoryTrack, ...],
+    cache_root: Path,
+    *,
+    ffprobe_path: str | Path,
+    force: bool,
+    parameters_hash: str,
+    probe_runner: ProbeRunner | None,
+    signal_analyzer: SignalAnalyzer | None,
+    section_backend: str,
+    key_backend: str,
+    section_backend_factory: SectionBackendFactory | None,
+    canonical_audio_root: Path | None,
+    workers: int,
+    debug_waveform_points: int | None,
+) -> tuple[BatchTrackResult, ...]:
+    worker_count = max(1, int(workers))
+    if worker_count == 1 or len(tracks) <= 1:
+        return tuple(
+            _analyze_manifest_track(
+                track,
+                cache_root,
+                ffprobe_path=ffprobe_path,
+                force=force,
+                parameters_hash=parameters_hash,
+                probe_runner=probe_runner,
+                signal_analyzer=signal_analyzer,
+                section_backend=section_backend,
+                key_backend=key_backend,
+                section_backend_factory=section_backend_factory,
+                canonical_audio_root=canonical_audio_root,
+                debug_waveform_points=debug_waveform_points,
+            )
+            for track in tracks
+        )
+
+    ordered_results: list[BatchTrackResult | None] = [None] * len(tracks)
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(
+                _analyze_manifest_track,
+                track,
+                cache_root,
+                ffprobe_path=ffprobe_path,
+                force=force,
+                parameters_hash=parameters_hash,
+                probe_runner=probe_runner,
+                signal_analyzer=signal_analyzer,
+                section_backend=section_backend,
+                key_backend=key_backend,
+                section_backend_factory=section_backend_factory,
+                canonical_audio_root=canonical_audio_root,
+                debug_waveform_points=debug_waveform_points,
+            ): index
+            for index, track in enumerate(tracks)
+        }
+        for future in as_completed(futures):
+            ordered_results[futures[future]] = future.result()
+
+    return tuple(result for result in ordered_results if result is not None)
 
 
 def artifact_identity_for_track(
@@ -240,10 +338,21 @@ def artifact_identity_for_track(
     )
 
 
-def _effective_parameters_hash(parameters_hash: str, *, canonical_audio_root: Path | None) -> str:
-    if canonical_audio_root is None:
-        return parameters_hash
-    return f"{parameters_hash}+canonical-pcm-v1"
+def _effective_parameters_hash(
+    parameters_hash: str,
+    *,
+    section_backend: str,
+    key_backend: str,
+    canonical_audio_root: Path | None,
+) -> str:
+    hash_parts = [parameters_hash]
+    if section_backend != SELECTED_SECTION_BACKEND:
+        hash_parts.append(f"section-backend-{section_backend}")
+    if key_backend != SELECTED_KEY_BACKEND:
+        hash_parts.append(f"key-backend-{key_backend}")
+    if canonical_audio_root is not None:
+        hash_parts.append("canonical-pcm-v1")
+    return "+".join(hash_parts)
 
 
 def _analyze_manifest_track(
@@ -256,9 +365,12 @@ def _analyze_manifest_track(
     probe_runner: ProbeRunner | None,
     signal_analyzer: SignalAnalyzer | None,
     section_backend: str,
+    key_backend: str,
     section_backend_factory: SectionBackendFactory | None,
     canonical_audio_root: Path | None,
+    debug_waveform_points: int | None,
 ) -> BatchTrackResult:
+    started_at = time.perf_counter()
     artifact_path: Path | None = None
     waveform_artifact_path: Path | None = None
     try:
@@ -273,6 +385,19 @@ def _analyze_manifest_track(
             identity,
             force=force,
         )
+        debug_waveform_path = artifact_path.parent / "debug-waveform.json"
+        if (
+            freshness.is_fresh
+            and debug_waveform_points is not None
+            and debug_waveform_points > 0
+            and not debug_waveform_path.exists()
+        ):
+            freshness = replace(
+                freshness,
+                is_fresh=False,
+                reason="debug_waveform_artifact_missing",
+                message="Debug waveform artifact does not exist",
+            )
 
         if freshness.is_fresh:
             return BatchTrackResult(
@@ -282,6 +407,7 @@ def _analyze_manifest_track(
                 waveform_path=waveform_artifact_path,
                 reason=freshness.reason,
                 message=freshness.message,
+                processing_seconds=_elapsed(started_at),
             )
 
         probe = probe_audio(
@@ -300,9 +426,11 @@ def _analyze_manifest_track(
                 identity,
                 created_at_utc,
                 section_backend=section_backend,
+                key_backend=key_backend,
                 section_backend_factory=section_backend_factory,
                 temp_dir=artifact_path.parent / "section-backend-work",
                 ffprobe_start_time_seconds=probe.start_time_seconds,
+                debug_waveform_points=debug_waveform_points,
             )
         else:
             signal_result = signal_analyzer(analysis_track, identity, created_at_utc)
@@ -321,6 +449,8 @@ def _analyze_manifest_track(
         )
         write_json_atomic(artifact_path, artifact)
         write_waveform_artifact(cache_root, track.track_id, signal_result.waveform_artifact)
+        if signal_result.debug_waveform_artifact is not None:
+            write_json_atomic(artifact_path.parent / "debug-waveform.json", signal_result.debug_waveform_artifact)
 
         return BatchTrackResult(
             track_id=track.track_id,
@@ -329,9 +459,16 @@ def _analyze_manifest_track(
             waveform_path=waveform_artifact_path,
             reason=freshness.reason,
             message=freshness.message,
+            processing_seconds=_elapsed(started_at),
         )
     except ProbeError as exc:
-        return _failed_track_result(track, artifact_path, waveform_artifact_path, exc.to_dict())
+        return _failed_track_result(
+            track,
+            artifact_path,
+            waveform_artifact_path,
+            exc.to_dict(),
+            processing_seconds=_elapsed(started_at),
+        )
     except (
         AudioLoadError,
         WaveformError,
@@ -339,11 +476,29 @@ def _analyze_manifest_track(
         TempoExtractionError,
         StructureExtractionError,
     ) as exc:
-        return _failed_track_result(track, artifact_path, waveform_artifact_path, _analysis_error_to_dict(track, exc))
+        return _failed_track_result(
+            track,
+            artifact_path,
+            waveform_artifact_path,
+            _analysis_error_to_dict(track, exc),
+            processing_seconds=_elapsed(started_at),
+        )
     except CacheError as exc:
-        return _failed_track_result(track, artifact_path, waveform_artifact_path, _cache_error_to_dict(track, exc))
+        return _failed_track_result(
+            track,
+            artifact_path,
+            waveform_artifact_path,
+            _cache_error_to_dict(track, exc),
+            processing_seconds=_elapsed(started_at),
+        )
     except Exception as exc:
-        return _failed_track_result(track, artifact_path, waveform_artifact_path, _analysis_error_to_dict(track, exc))
+        return _failed_track_result(
+            track,
+            artifact_path,
+            waveform_artifact_path,
+            _analysis_error_to_dict(track, exc),
+            processing_seconds=_elapsed(started_at),
+        )
 
 
 def analyze_track_signal(
@@ -352,18 +507,20 @@ def analyze_track_signal(
     created_at_utc: str,
     *,
     section_backend: str = SELECTED_SECTION_BACKEND,
+    key_backend: str = SELECTED_KEY_BACKEND,
     section_backend_factory: SectionBackendFactory | None = None,
     temp_dir: str | Path | None = None,
     ffprobe_start_time_seconds: float | None = None,
+    debug_waveform_points: int | None = None,
 ) -> SignalAnalysisResult:
     """Decode audio and compute real signal-derived analysis features."""
 
     from .backends.current_signal import CurrentSignalBackend
 
     current_backend = CurrentSignalBackend()
-    signal_result = current_backend.analyze_signal(track, identity, created_at_utc)
     selected_section_backend = section_backend.strip() or SELECTED_SECTION_BACKEND
     audio = current_backend.load_track_audio(track)
+    signal_result = current_backend.analyze_decoded_signal(track, identity, created_at_utc, audio)
     key_context = AnalysisContext(
         track_id=track.track_id,
         source_path=track.source_path,
@@ -372,12 +529,33 @@ def analyze_track_signal(
         ffprobe_start_time_seconds=ffprobe_start_time_seconds,
         source_content_hash=identity.source_content_hash,
     )
-    key_result = _select_key_result(audio=audio, context=key_context)
+    debug_waveform_artifact = None
+    if debug_waveform_points is not None and debug_waveform_points > 0:
+        debug_waveform_artifact = current_backend.build_debug_waveform(
+            audio,
+            key_context,
+            created_at_utc=created_at_utc,
+            target_point_count=debug_waveform_points,
+        )
+    key_context, key_excerpt_warnings = _key_analysis_context(
+        track,
+        identity,
+        audio,
+        temp_dir=Path(temp_dir) if temp_dir is not None else None,
+        ffprobe_start_time_seconds=ffprobe_start_time_seconds,
+    )
+    key_result = _select_key_result(
+        audio=audio,
+        context=key_context,
+        key_backend=key_backend,
+        extra_warnings=key_excerpt_warnings,
+    )
     if selected_section_backend == CURRENT_SIGNAL_BACKEND:
         return replace(
             signal_result,
             key_result=key_result,
             section_result=current_backend.section_result_from_features(signal_result.structure_features),
+            debug_waveform_artifact=debug_waveform_artifact,
         )
     work_dir = Path(temp_dir) if temp_dir is not None else None
     analysis_audio_path, audio_warnings = _write_section_analysis_audio(audio, work_dir)
@@ -401,7 +579,12 @@ def analyze_track_signal(
         structure_features=signal_result.structure_features,
         extra_warnings=audio_warnings,
     )
-    return replace(signal_result, key_result=key_result, section_result=section_result)
+    return replace(
+        signal_result,
+        key_result=key_result,
+        section_result=section_result,
+        debug_waveform_artifact=debug_waveform_artifact,
+    )
 
 
 def _track_for_analysis_audio(track: RepositoryTrack, canonical_audio_root: Path | None) -> RepositoryTrack:
@@ -700,28 +883,117 @@ def _select_key_result(
     *,
     audio: DecodedAudio,
     context: AnalysisContext,
+    key_backend: str = SELECTED_KEY_BACKEND,
     key_backend_factory: Callable[[], KeyDetectorBackend] | None = None,
+    extra_warnings: tuple[str, ...] = (),
 ) -> KeyCandidateResult:
-    selected_name = SELECTED_KEY_BACKEND
+    selected_name = key_backend.strip() or SELECTED_KEY_BACKEND
     try:
-        backend = key_backend_factory() if key_backend_factory is not None else SelectedKeyBackend()
+        backend = key_backend_factory() if key_backend_factory is not None else _default_key_backend(selected_name)
         if not isinstance(backend, KeyDetectorBackend):
             raise TypeError(f"selected key backend '{selected_name}' does not implement KeyDetectorBackend")
-        return backend.analyze_key(audio, context)
+        return _with_key_warnings(backend.analyze_key(audio, context), extra_warnings)
     except Exception as exc:
-        return KeyCandidateResult(
-            status="failed",
-            provenance=CandidateProvenance(
-                backend_name=selected_name,
-                backend_version=__version__,
+        return _with_key_warnings(
+            KeyCandidateResult(
+                status="failed",
+                provenance=CandidateProvenance(
+                    backend_name=selected_name,
+                    backend_version=__version__,
+                ),
+                error=BackendExecutionError(
+                    code="selected_key_failed",
+                    message=str(exc) or exc.__class__.__name__,
+                    backend_name=selected_name,
+                    details={"exceptionType": exc.__class__.__name__},
+                ),
             ),
-            error=BackendExecutionError(
-                code="selected_key_failed",
-                message=str(exc) or exc.__class__.__name__,
-                backend_name=selected_name,
-                details={"exceptionType": exc.__class__.__name__},
-            ),
+            extra_warnings,
         )
+
+
+def _default_key_backend(key_backend: str) -> KeyDetectorBackend:
+    if key_backend == SELECTED_KEY_BACKEND:
+        return SelectedKeyBackend()
+    if key_backend == KEYFINDER_KEY_BACKEND:
+        return KeyFinderKeyBackend()
+    if key_backend == MADMOM_KEY_BACKEND:
+        return MadmomKeyBackend()
+    raise ValueError(
+        "unsupported key backend "
+        f"'{key_backend}'; expected '{SELECTED_KEY_BACKEND}', '{KEYFINDER_KEY_BACKEND}', or '{MADMOM_KEY_BACKEND}'"
+    )
+
+
+def _key_analysis_context(
+    track: RepositoryTrack,
+    identity: ArtifactIdentity,
+    audio: DecodedAudio,
+    *,
+    temp_dir: Path | None,
+    ffprobe_start_time_seconds: float | None,
+) -> tuple[AnalysisContext, tuple[str, ...]]:
+    base_context = AnalysisContext(
+        track_id=track.track_id,
+        source_path=track.source_path,
+        analysis_audio_path=track.source_path,
+        duration_seconds=audio.duration_seconds,
+        ffprobe_start_time_seconds=ffprobe_start_time_seconds,
+        temp_dir=temp_dir,
+        source_content_hash=identity.source_content_hash,
+    )
+    if temp_dir is None or audio.duration_seconds <= DEFAULT_KEY_ANALYSIS_EXCERPT_SECONDS:
+        return base_context, ()
+
+    sample_count = int(len(audio.samples))
+    max_samples = int(round(DEFAULT_KEY_ANALYSIS_EXCERPT_SECONDS * audio.sample_rate))
+    if sample_count <= max_samples:
+        return base_context, ()
+
+    start_sample = max(0, (sample_count - max_samples) // 2)
+    end_sample = min(sample_count, start_sample + max_samples)
+    excerpt_path = temp_dir / "key-analysis-excerpt.wav"
+    try:
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        from .dependencies import require_optional_dependency
+
+        soundfile = require_optional_dependency("soundfile", module_name="soundfile", install_extra="analysis")
+        soundfile.write(str(excerpt_path), audio.samples[start_sample:end_sample], audio.sample_rate)
+    except Exception as exc:
+        return base_context, (
+            "Could not write bounded key-analysis excerpt; using full source audio for key detection: "
+            f"{exc}",
+        )
+
+    excerpt_seconds = (end_sample - start_sample) / audio.sample_rate
+    return (
+        AnalysisContext(
+            track_id=track.track_id,
+            source_path=track.source_path,
+            analysis_audio_path=excerpt_path,
+            duration_seconds=excerpt_seconds,
+            ffprobe_start_time_seconds=ffprobe_start_time_seconds,
+            temp_dir=temp_dir,
+            source_content_hash=identity.source_content_hash,
+        ),
+        (
+            f"Key detection used a bounded {excerpt_seconds:.1f}s middle excerpt "
+            "to keep batch analysis latency predictable.",
+        ),
+    )
+
+
+def _with_key_warnings(
+    key_result: KeyCandidateResult,
+    warnings: tuple[str, ...],
+) -> KeyCandidateResult:
+    if not warnings:
+        return key_result
+    provenance = replace(
+        key_result.provenance,
+        warnings=tuple((*key_result.provenance.warnings, *warnings)),
+    )
+    return replace(key_result, provenance=provenance)
 
 
 def _select_semantic_section_result(
@@ -857,6 +1129,8 @@ def _failed_track_result(
     artifact_path: Path | None,
     waveform_artifact_path: Path | None,
     error: dict[str, str],
+    *,
+    processing_seconds: float | None = None,
 ) -> BatchTrackResult:
     return BatchTrackResult(
         track_id=track.track_id,
@@ -866,6 +1140,7 @@ def _failed_track_result(
         reason=error["code"],
         message=error["message"],
         error=error,
+        processing_seconds=processing_seconds,
     )
 
 
@@ -886,6 +1161,10 @@ def _analysis_error_to_dict(track: RepositoryTrack, error: Any) -> dict[str, str
     payload["trackId"] = track.track_id
     payload["sourceUri"] = track.source_uri
     return payload
+
+
+def _elapsed(started_at: float) -> float:
+    return round(max(0.0, time.perf_counter() - started_at), 6)
 
 
 def _utc_now_iso() -> str:

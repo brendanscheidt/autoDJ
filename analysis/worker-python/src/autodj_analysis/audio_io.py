@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
 from typing import Any
 
 from .dependencies import OptionalDependencyUnavailable, require_optional_dependency
@@ -86,6 +87,16 @@ def load_audio(
             track_id=track_id,
         )
 
+    if target_sample_rate is not None:
+        ffmpeg_decoded = _load_audio_with_ffmpeg(
+            path,
+            target_sample_rate=target_sample_rate,
+            source_uri=error_source_uri,
+            track_id=track_id,
+        )
+        if ffmpeg_decoded is not None:
+            return ffmpeg_decoded
+
     soundfile = _require_audio_dependency(
         "soundfile",
         module_name="soundfile",
@@ -154,6 +165,65 @@ def load_audio(
         sample_rate=sample_rate,
         duration_seconds=float(mono_samples.shape[0] / sample_rate),
         channels=channel_count,
+        source_path=path,
+    )
+
+
+def _load_audio_with_ffmpeg(
+    path: Path,
+    *,
+    target_sample_rate: int,
+    source_uri: str,
+    track_id: str | None,
+) -> DecodedAudio | None:
+    numpy = _require_audio_dependency(
+        "numpy",
+        module_name="numpy",
+        source_uri=source_uri,
+        track_id=track_id,
+    )
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(path),
+        "-f",
+        "f32le",
+        "-ac",
+        "1",
+        "-ar",
+        str(target_sample_rate),
+        "pipe:1",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+    if completed.returncode != 0:
+        return None
+    samples = numpy.frombuffer(completed.stdout, dtype=numpy.float32).copy()
+    if samples.size == 0:
+        raise AudioLoadError(
+            "audio_empty",
+            "Decoded audio source contains no samples.",
+            source_uri=source_uri,
+            track_id=track_id,
+        )
+    return DecodedAudio(
+        samples=samples,
+        sample_rate=target_sample_rate,
+        duration_seconds=float(samples.shape[0] / target_sample_rate),
+        channels=1,
         source_path=path,
     )
 

@@ -314,8 +314,8 @@ def test_track_signal_analyzer_can_use_selected_current_signal_section_backend(m
     calls = []
 
     class FakeCurrentSignalBackend:
-        def analyze_signal(self, seen_track, seen_identity, seen_created_at_utc):
-            calls.append((seen_track, seen_identity, seen_created_at_utc))
+        def analyze_decoded_signal(self, seen_track, seen_identity, seen_created_at_utc, seen_audio):
+            calls.append((seen_track, seen_identity, seen_created_at_utc, seen_audio.source_path))
             return selected_signal_result
 
         def load_track_audio(self, seen_track):
@@ -336,7 +336,7 @@ def test_track_signal_analyzer_can_use_selected_current_signal_section_backend(m
     assert result.waveform_artifact == {"trackId": "track-a"}
     assert result.section_result is not None
     assert result.section_result.provenance.backend_name == CURRENT_SIGNAL_BACKEND
-    assert calls == [(track, identity, "2026-05-18T00:00:00Z")]
+    assert calls == [(track, identity, "2026-05-18T00:00:00Z", track.source_path)]
 
 
 def test_current_signal_analyzer_preserves_legacy_artifact_composition(tmp_path: Path) -> None:
