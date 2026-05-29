@@ -11,7 +11,7 @@ to create transitions a human electronic music DJ would recognize:
 
 - Phrase-aligned blends.
 - Build-to-drop switches.
-- Drop doubles and drop swaps.
+- Drop swaps.
 - Loop tightening to build tension.
 - EQ-aware bass swaps.
 - Acapella-over-instrumental moments when stems and vocal timing allow it.

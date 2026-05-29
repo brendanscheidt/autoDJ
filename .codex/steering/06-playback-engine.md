@@ -67,6 +67,18 @@ volume may cut to zero while the already-fed reverb return continues to decay.
 Reverb quality is still POC-level; authored recipes and rendered auditions are
 the source of truth for tuning.
 
+Spec 011 note: the offline renderer currently uses a soft limiter to catch
+overs, while drop-switch gain planning is handled before render with RMS,
+low-band, and drop peak comparisons. This improves transition continuity, but
+it is not a final mastering chain. A future loudness stage should use rendered
+window measurement and LUFS/true-peak style normalization if full-set loudness
+needs to be product-grade.
+
+Spec 011 wash-out note: accepted full-set plans should use the user-rendered
+sweep sample at `C:\Users\Brendan\Desktop\sweep.wav`. The renderer still
+supports the generated wash-out sweep URI as an explicit legacy fallback, but
+the planner must not substitute it by default.
+
 ## Automation
 
 Automation is represented as keyframes on controls.

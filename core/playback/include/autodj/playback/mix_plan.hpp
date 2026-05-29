@@ -26,7 +26,6 @@ enum class TransitionTechnique {
     BuildToDropSwap,
     DropEndReverbExit,
     WashOut,
-    DropDouble,
     LoopTighten,
     VocalOverInstrumental,
     EchoOut,

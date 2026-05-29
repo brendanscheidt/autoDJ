@@ -74,3 +74,35 @@ Known pain points:
 - Steering docs and runbooks describe the accepted workflow and remaining
   limitations.
 
+## Accepted Workflow
+
+Spec 011 promotes the supported workflow to:
+
+```text
+existing AnalyzedTrack cache
+  -> autodj-analysis plan-set --mode plan-preview
+  -> listen to previews/index.json and preview WAVs
+  -> render an accepted mix-plan-full-set.json with autodj-analysis render-mixplan
+```
+
+The full runbook lives at:
+
+`./011-full-set-planner-transition-qa/full-set-planner-runbook.md`
+
+Current checkpoint artifacts:
+
+- Preview source plan:
+  `.autodj-cache/full-set-poc/spec011-drop-lookahead-gainv2-smoke-20260527-190044/mix-plan-full-set.json`
+- Full rendered WAV:
+  `.autodj-cache/full-set-poc/spec011-full-render-checkpoint-20260527-2118/render/audition.wav`
+
+Correction after full-set audition: that full rendered WAV exposed a merge bug
+where `washout-sweep-fx` was rewritten to the renderer's generated sweep URI.
+Future `plan-set` runs must use the configured user-rendered sweep asset
+(`C:/Users/Brendan/Desktop/sweep.wav`) and should not use that checkpoint to
+judge final wash-out tone.
+
+Known remaining limitation: drop-switch transient alignment is acceptable in the
+latest preview packs, but perceived loudness matching is still POC-level. The
+gain post-pass now considers broad RMS, low-band energy, and drop peak matching,
+but it is not a mastered LUFS/true-peak chain.

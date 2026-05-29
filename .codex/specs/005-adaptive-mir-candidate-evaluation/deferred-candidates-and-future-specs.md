@@ -63,8 +63,8 @@ Primary source pointers:
 
 Purpose:
 
-- Enable vocal clash detection, acapella/instrumental layering, drop doubles
-  with frequency masking, and stem-aware cue ranking.
+- Enable vocal clash detection, acapella/instrumental layering, and stem-aware
+  cue ranking.
 
 Deferred candidates:
 
@@ -146,7 +146,7 @@ Primary source pointers:
 Purpose:
 
 - Turn analysis metadata into musical deck commands, EQ/filter automation,
-  looping, cuts, doubles, and stem-aware transitions.
+  looping, cuts, and stem-aware transitions.
 
 Deferred systems and references:
 
@@ -166,11 +166,9 @@ Recommended future spec shape:
    - intro/outro blend;
    - build-to-drop swap;
    - loop-tighten into drop;
-   - drop double;
-   - frequency-complement drop double;
    - vocal predrop layer;
    - hard/impact cut.
-2. Require high beatgrid confidence for loop tightening and drop doubles.
+2. Require high beatgrid confidence for loop tightening.
 3. Require section confidence before planning complex semantic transitions.
 4. Record rejected alternatives and risk flags in `MixPlan` annotations.
 5. Use ML only for cue ranking or risk scoring until deterministic templates

@@ -148,6 +148,13 @@ def test_parse_semantic_cue_label_supports_named_boundaries() -> None:
     assert parsed.ordinal == 2
     assert parsed.boundary == "start"
 
+    concise = parse_semantic_cue_label("build_2", provider_name="rekordbox")
+
+    assert concise is not None
+    assert concise.section_type == "build"
+    assert concise.ordinal == 2
+    assert concise.boundary == "start"
+
 
 def test_apply_rekordbox_overrides_uses_named_semantic_cues_when_present(tmp_path: Path) -> None:
     track = load_rekordbox_track(_write_named_rekordbox_xml(tmp_path))

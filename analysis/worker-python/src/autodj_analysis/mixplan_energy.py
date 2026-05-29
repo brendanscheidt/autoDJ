@@ -40,6 +40,12 @@ class GainPlanOptions:
     window_measures: float = 8.0
     low_cutoff_hz: float = DEFAULT_LOW_CUTOFF_HZ
     high_cutoff_hz: float = DEFAULT_HIGH_CUTOFF_HZ
+    target_drop_loudness_tolerance_db: float = 0.5
+    max_incoming_boost_db: float = 6.0
+    max_incoming_trim_db: float = 0.0
+    drop_peak_match_tolerance_db: float = 0.25
+    max_drop_peak_match_boost_db: float = 4.0
+    drop_peak_window_beats: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,8 @@ class GainPlanResult:
     verdict: str
     outgoing_overlap_gain: float
     outgoing_overlap_trim_db: float
+    incoming_drop_gain: float
+    incoming_drop_gain_db: float
     b_drop_vs_post_gain_layered_db: float
     reasons: tuple[str, ...]
 
@@ -63,6 +71,8 @@ class GainPlanResult:
             "verdict": self.verdict,
             "outgoingOverlapGain": self.outgoing_overlap_gain,
             "outgoingOverlapTrimDb": self.outgoing_overlap_trim_db,
+            "incomingDropGain": self.incoming_drop_gain,
+            "incomingDropGainDb": self.incoming_drop_gain_db,
             "bDropVsPostGainLayeredDb": self.b_drop_vs_post_gain_layered_db,
             "reasons": list(self.reasons),
         }
@@ -162,27 +172,52 @@ def gain_plan_drop_switch(
     working_plan = copy.deepcopy(plan)
     context = _context(working_plan, mix_plan_path=mix_plan_path, options=options)
     windows = _window_metrics(context, options=options)
+    incoming_gain, incoming_gain_db, incoming_gain_reasons = _recommended_incoming_drop_gain(
+        windows,
+        options=options,
+    )
     comparisons = _energy_comparisons(windows, options=options)
     outgoing_gain, outgoing_trim_db, gain_reasons = _recommended_outgoing_gain(
         windows,
+        incoming_gain=incoming_gain,
         options=options,
     )
     post_gain_layered_rms_db = _layered_build_rms_db(
         windows["aBuildFinal"],
         windows["bBuildFinal"],
         outgoing_gain=outgoing_gain,
+        incoming_gain=incoming_gain,
     )
     comparisons["postGainLayeredBuildRmsDb"] = post_gain_layered_rms_db
-    comparisons["bDropVsPostGainLayeredDb"] = windows["bDropFirst"].rms_db - post_gain_layered_rms_db
+    comparisons["incomingDropGainDb"] = incoming_gain_db
+    comparisons["aDropVsRawBDropDb"] = windows["aDropFirst"].rms_db - windows["bDropFirst"].rms_db
+    comparisons["aReferenceDropVsRawBDropDb"] = windows["aReferenceDrop"].rms_db - windows["bDropFirst"].rms_db
+    comparisons["targetIncomingDropRmsDb"] = _target_incoming_drop_db(windows, options=options)
+    comparisons["postGainBDropRmsDb"] = _linear_to_db(windows["bDropFirst"].rms_linear * incoming_gain)
+    comparisons["bDropVsPostGainLayeredDb"] = comparisons["postGainBDropRmsDb"] - post_gain_layered_rms_db
+    comparisons["aReferenceDropPeakDb"] = windows["aReferenceDrop"].peak_db
+    comparisons["targetReferenceDropPeakDb"] = _target_reference_peak_db(windows)
+    comparisons["aDropImpactPeakDb"] = windows["aDropImpact"].peak_db
+    comparisons["bDropImpactPeakDb"] = windows["bDropImpact"].peak_db
+    comparisons["postGainBDropPeakDb"] = _linear_to_db(windows["bDropFirst"].peak_linear * incoming_gain)
+    comparisons["postGainBDropImpactPeakDb"] = _linear_to_db(windows["bDropImpact"].peak_linear * incoming_gain)
+    comparisons["bDropImpactPeakVsADropImpactDb"] = (
+        comparisons["postGainBDropImpactPeakDb"] - windows["aDropImpact"].peak_db
+    )
 
     verdict, verdict_reasons = _compatibility_verdict(windows, comparisons, options=options)
-    reasons = tuple(gain_reasons + verdict_reasons)
-    final_keyframes = _apply_outgoing_gain(
+    reasons = tuple(incoming_gain_reasons + gain_reasons + verdict_reasons)
+    outgoing_keyframes = _apply_outgoing_gain(
         working_plan,
         context.transition,
         context.outgoing_placement,
         context.incoming_placement,
         outgoing_gain=outgoing_gain,
+    )
+    incoming_keyframes = _apply_incoming_gain(
+        working_plan,
+        context.incoming_placement,
+        incoming_gain=incoming_gain,
     )
     _append_gain_annotation(
         working_plan,
@@ -190,6 +225,7 @@ def gain_plan_drop_switch(
         context.outgoing_placement,
         verdict=verdict,
         trim_db=outgoing_trim_db,
+        incoming_gain_db=incoming_gain_db,
         b_drop_delta_db=comparisons["bDropVsPostGainLayeredDb"],
     )
 
@@ -204,7 +240,10 @@ def gain_plan_drop_switch(
         reasons=reasons,
         outgoing_gain=outgoing_gain,
         outgoing_trim_db=outgoing_trim_db,
-        final_keyframes=final_keyframes,
+        incoming_gain=incoming_gain,
+        incoming_gain_db=incoming_gain_db,
+        outgoing_keyframes=outgoing_keyframes,
+        incoming_keyframes=incoming_keyframes,
         options=options,
     )
 
@@ -220,6 +259,8 @@ def gain_plan_drop_switch(
         verdict=verdict,
         outgoing_overlap_gain=outgoing_gain,
         outgoing_overlap_trim_db=outgoing_trim_db,
+        incoming_drop_gain=incoming_gain,
+        incoming_drop_gain_db=incoming_gain_db,
         b_drop_vs_post_gain_layered_db=comparisons["bDropVsPostGainLayeredDb"],
         reasons=reasons,
     )
@@ -236,6 +277,14 @@ def _validate_options(options: GainPlanOptions) -> None:
         raise MixPlanEnergyError("invalid_window_measures", "Energy window measure count must be greater than zero")
     if options.low_cutoff_hz <= 0.0 or options.high_cutoff_hz <= options.low_cutoff_hz:
         raise MixPlanEnergyError("invalid_band_cutoffs", "Band cutoff frequencies are invalid")
+    if options.target_drop_loudness_tolerance_db < 0.0:
+        raise MixPlanEnergyError("invalid_loudness_tolerance", "Drop loudness tolerance must be non-negative")
+    if options.max_incoming_boost_db < 0.0 or options.max_incoming_trim_db < 0.0:
+        raise MixPlanEnergyError("invalid_incoming_gain", "Incoming gain limits must be non-negative")
+    if options.drop_peak_match_tolerance_db < 0.0 or options.max_drop_peak_match_boost_db < 0.0:
+        raise MixPlanEnergyError("invalid_peak_match", "Drop peak matching limits must be non-negative")
+    if options.drop_peak_window_beats <= 0.0:
+        raise MixPlanEnergyError("invalid_peak_window", "Drop peak matching window must be greater than zero")
 
 
 def _context(plan: dict[str, Any], *, mix_plan_path: Path, options: GainPlanOptions) -> _PlanContext:
@@ -277,6 +326,9 @@ def _window_metrics(context: _PlanContext, *, options: GainPlanOptions) -> dict[
     incoming_measure_seconds = max((to_drop - to_build) / measure_count, outgoing_measure_seconds)
     outgoing_window_seconds = min(options.window_measures, measure_count) * outgoing_measure_seconds
     incoming_window_seconds = min(options.window_measures, measure_count) * incoming_measure_seconds
+    outgoing_peak_window_seconds = options.drop_peak_window_beats * outgoing_measure_seconds / 4.0
+    incoming_peak_window_seconds = options.drop_peak_window_beats * incoming_measure_seconds / 4.0
+    outgoing_source_start = _number(context.outgoing_placement, "sourceStartSeconds", 0.0)
 
     outgoing_track_id = _required_string(context.outgoing_placement, "trackId")
     incoming_track_id = _required_string(context.incoming_placement, "trackId")
@@ -313,7 +365,92 @@ def _window_metrics(context: _PlanContext, *, options: GainPlanOptions) -> dict[
             from_drop + outgoing_window_seconds,
             options=options,
         ),
+        "aReferenceDrop": _strongest_metrics_for_window(
+            "aReferenceDrop",
+            outgoing_track_id,
+            context.outgoing_audio,
+            outgoing_source_start,
+            from_build,
+            outgoing_window_seconds,
+            hop_seconds=outgoing_measure_seconds,
+            fallback_start_seconds=from_drop,
+            options=options,
+        ),
+        "aDropImpact": _metrics_for_window(
+            "aDropImpact",
+            outgoing_track_id,
+            context.outgoing_audio,
+            from_drop,
+            from_drop + outgoing_peak_window_seconds,
+            options=options,
+        ),
+        "bDropImpact": _metrics_for_window(
+            "bDropImpact",
+            incoming_track_id,
+            context.incoming_audio,
+            to_drop,
+            to_drop + incoming_peak_window_seconds,
+            options=options,
+        ),
     }
+
+
+def _strongest_metrics_for_window(
+    window_id: str,
+    track_id: str,
+    audio: LoadedAudio,
+    start_seconds: float,
+    end_seconds: float,
+    window_seconds: float,
+    *,
+    hop_seconds: float,
+    fallback_start_seconds: float,
+    options: GainPlanOptions,
+) -> _WindowMetrics:
+    duration = len(audio.samples) / audio.sample_rate
+    start_seconds = max(0.0, min(duration, start_seconds))
+    end_seconds = max(start_seconds, min(duration, end_seconds))
+    window_seconds = max(_EPSILON, min(window_seconds, duration))
+    hop_seconds = max(_EPSILON, hop_seconds)
+    if end_seconds - start_seconds < window_seconds * 0.75:
+        return _metrics_for_window(
+            window_id,
+            track_id,
+            audio,
+            fallback_start_seconds,
+            fallback_start_seconds + window_seconds,
+            options=options,
+        )
+
+    best: _WindowMetrics | None = None
+    cursor = start_seconds
+    last_start = max(start_seconds, end_seconds - window_seconds)
+    while cursor <= last_start + 0.000001:
+        metrics = _metrics_for_window(
+            window_id,
+            track_id,
+            audio,
+            cursor,
+            cursor + window_seconds,
+            options=options,
+        )
+        if best is None or _reference_drop_score(metrics) > _reference_drop_score(best):
+            best = metrics
+        cursor += hop_seconds
+    if best is None:
+        return _metrics_for_window(
+            window_id,
+            track_id,
+            audio,
+            fallback_start_seconds,
+            fallback_start_seconds + window_seconds,
+            options=options,
+        )
+    return best
+
+
+def _reference_drop_score(metrics: _WindowMetrics) -> float:
+    return metrics.rms_linear + 0.35 * metrics.low_rms_linear + 0.15 * metrics.peak_linear
 
 
 def _metrics_for_window(
@@ -388,14 +525,81 @@ def _energy_comparisons(windows: dict[str, _WindowMetrics], *, options: GainPlan
     }
 
 
-def _recommended_outgoing_gain(
+def _recommended_incoming_drop_gain(
     windows: dict[str, _WindowMetrics],
     *,
     options: GainPlanOptions,
 ) -> tuple[float, float, list[str]]:
+    target_drop_db = _target_incoming_drop_db(windows, options=options)
+    rms_delta_db = target_drop_db - windows["bDropFirst"].rms_db
+    reference_peak_db = _target_reference_peak_db(windows)
+    incoming_peak_db = max(windows["bDropImpact"].peak_db, windows["bDropFirst"].peak_db)
+    peak_delta_db = reference_peak_db - incoming_peak_db - options.drop_peak_match_tolerance_db
+    rms_gain_db = _positive_gain_after_tolerance(
+        rms_delta_db,
+        tolerance_db=options.target_drop_loudness_tolerance_db,
+        max_gain_db=options.max_incoming_boost_db,
+    )
+    peak_gain_db = _positive_gain_after_tolerance(
+        peak_delta_db,
+        tolerance_db=0.0,
+        max_gain_db=min(options.max_drop_peak_match_boost_db, options.max_incoming_boost_db),
+    )
+    gain_db = max(rms_gain_db, peak_gain_db)
+    reasons: list[str] = []
+
+    if rms_gain_db > 0.05:
+        reasons.append("incoming_drop_boost_for_loudness_match")
+        if rms_gain_db < rms_delta_db - options.target_drop_loudness_tolerance_db - 0.05:
+            reasons.append("incoming_drop_boost_limited")
+    if peak_gain_db > 0.05:
+        reasons.append("incoming_drop_boost_for_peak_match")
+        if peak_gain_db < peak_delta_db - 0.05:
+            reasons.append("incoming_drop_peak_boost_limited")
+    if gain_db > 0.05:
+        return _db_to_linear(gain_db), gain_db, reasons
+
+    if abs(rms_delta_db) <= options.target_drop_loudness_tolerance_db and peak_delta_db <= 0.0:
+        return 1.0, 0.0, ["incoming_drop_loudness_and_peak_within_tolerance"]
+    if rms_delta_db < -options.target_drop_loudness_tolerance_db and options.max_incoming_trim_db > 0.0:
+        gain_db = -min(abs(rms_delta_db) - options.target_drop_loudness_tolerance_db, options.max_incoming_trim_db)
+        if gain_db < -0.05:
+            reasons.append("incoming_drop_trim_for_loudness_match")
+            if abs(gain_db) < abs(rms_delta_db) - options.target_drop_loudness_tolerance_db - 0.05:
+                reasons.append("incoming_drop_trim_limited")
+    else:
+        gain_db = 0.0
+        reasons.append("incoming_drop_not_trimmed_drop_energy_is_reference")
+    return _db_to_linear(gain_db), gain_db, reasons
+
+
+def _positive_gain_after_tolerance(delta_db: float, *, tolerance_db: float, max_gain_db: float) -> float:
+    if delta_db <= tolerance_db:
+        return 0.0
+    return min(delta_db - tolerance_db, max_gain_db)
+
+
+def _target_incoming_drop_db(windows: dict[str, _WindowMetrics], *, options: GainPlanOptions) -> float:
+    return max(
+        windows["aDropFirst"].rms_db,
+        windows["aReferenceDrop"].rms_db,
+        windows["bBuildFinal"].rms_db + options.target_headroom_db,
+    )
+
+
+def _target_reference_peak_db(windows: dict[str, _WindowMetrics]) -> float:
+    return max(windows["aDropImpact"].peak_db, windows["aDropFirst"].peak_db, windows["aReferenceDrop"].peak_db)
+
+
+def _recommended_outgoing_gain(
+    windows: dict[str, _WindowMetrics],
+    *,
+    incoming_gain: float,
+    options: GainPlanOptions,
+) -> tuple[float, float, list[str]]:
     a_non_low = windows["aBuildFinal"].non_low_rms_linear
-    b_build = windows["bBuildFinal"].rms_linear
-    b_drop_target = _db_to_linear(windows["bDropFirst"].rms_db - options.target_headroom_db)
+    b_build = windows["bBuildFinal"].rms_linear * incoming_gain
+    b_drop_target = windows["bDropFirst"].rms_linear * incoming_gain / _db_to_linear(options.target_headroom_db)
     reasons: list[str] = []
     if a_non_low <= _EPSILON:
         return 1.0, 0.0, ["outgoing_non_low_build_energy_too_low_for_overlap_trim"]
@@ -472,6 +676,30 @@ def _apply_outgoing_gain(
     ]
 
 
+def _apply_incoming_gain(
+    plan: dict[str, Any],
+    incoming_placement: dict[str, Any],
+    *,
+    incoming_gain: float,
+) -> list[dict[str, object]]:
+    incoming_deck = _required_int(incoming_placement, "deck")
+    command = _volume_command(_list_field(plan, "commands"), incoming_deck)
+    keyframes = _keyframes(command)
+    if not math.isclose(incoming_gain, 1.0, rel_tol=0.0, abs_tol=0.000001):
+        for keyframe in keyframes:
+            value = _number(keyframe, "value", 0.0)
+            keyframe["value"] = value * incoming_gain
+    keyframes.sort(key=lambda keyframe: float(keyframe.get("at", 0.0)))
+    return [
+        {
+            "at": _round(float(keyframe.get("at", 0.0))),
+            "value": _round(float(keyframe.get("value", 0.0))),
+            "interpolation": str(keyframe.get("interpolation", "linear")),
+        }
+        for keyframe in keyframes
+    ]
+
+
 def _incoming_full_volume_time(commands: list[Any], incoming_deck: int, transition: dict[str, Any]) -> float:
     command = _volume_command(commands, incoming_deck)
     keyframes = _keyframes(command)
@@ -522,6 +750,7 @@ def _append_gain_annotation(
     *,
     verdict: str,
     trim_db: float,
+    incoming_gain_db: float,
     b_drop_delta_db: float,
 ) -> None:
     annotations = plan.setdefault("annotations", [])
@@ -535,6 +764,7 @@ def _append_gain_annotation(
             "message": (
                 "Drop-switch energy gain post-pass: "
                 f"verdict={verdict}, outgoing overlap trim={trim_db:.2f}dB, "
+                f"incoming drop gain={incoming_gain_db:.2f}dB, "
                 f"B drop vs planned layered build={b_drop_delta_db:.2f}dB"
             ),
         }
@@ -553,7 +783,10 @@ def _report_payload(
     reasons: tuple[str, ...],
     outgoing_gain: float,
     outgoing_trim_db: float,
-    final_keyframes: list[dict[str, object]],
+    incoming_gain: float,
+    incoming_gain_db: float,
+    outgoing_keyframes: list[dict[str, object]],
+    incoming_keyframes: list[dict[str, object]],
     options: GainPlanOptions,
 ) -> dict[str, object]:
     return {
@@ -569,6 +802,8 @@ def _report_payload(
         "reasons": list(reasons),
         "recommendedOutgoingTrimDb": _round(outgoing_trim_db),
         "postGainOutgoingGain": _round(outgoing_gain),
+        "recommendedIncomingDropGainDb": _round(incoming_gain_db),
+        "postGainIncomingDropGain": _round(incoming_gain),
         "settings": {
             "sampleRate": options.sample_rate,
             "targetHeadroomDb": options.target_headroom_db,
@@ -577,10 +812,19 @@ def _report_payload(
             "windowMeasures": options.window_measures,
             "lowCutoffHz": options.low_cutoff_hz,
             "highCutoffHz": options.high_cutoff_hz,
+            "targetDropLoudnessToleranceDb": options.target_drop_loudness_tolerance_db,
+            "maxIncomingBoostDb": options.max_incoming_boost_db,
+            "maxIncomingTrimDb": options.max_incoming_trim_db,
+            "dropPeakMatchToleranceDb": options.drop_peak_match_tolerance_db,
+            "maxDropPeakMatchBoostDb": options.max_drop_peak_match_boost_db,
+            "dropPeakWindowBeats": options.drop_peak_window_beats,
         },
         "windows": {name: metrics.to_dict() for name, metrics in windows.items()},
         "comparisons": {key: _round(value) for key, value in comparisons.items()},
-        "finalVolumeKeyframes": final_keyframes,
+        "finalVolumeKeyframes": {
+            "outgoing": outgoing_keyframes,
+            "incoming": incoming_keyframes,
+        },
     }
 
 
@@ -589,8 +833,9 @@ def _layered_build_rms_db(
     b_build: _WindowMetrics,
     *,
     outgoing_gain: float,
+    incoming_gain: float = 1.0,
 ) -> float:
-    layered = math.sqrt((a_build.non_low_rms_linear * outgoing_gain) ** 2 + b_build.rms_linear**2)
+    layered = math.sqrt((a_build.non_low_rms_linear * outgoing_gain) ** 2 + (b_build.rms_linear * incoming_gain) ** 2)
     return _linear_to_db(layered)
 
 

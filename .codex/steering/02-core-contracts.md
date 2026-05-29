@@ -361,7 +361,6 @@ interface TrackPlacement {
 type TransitionTechnique =
   | "intro_outro_blend"
   | "build_to_drop_swap"
-  | "drop_double"
   | "loop_tighten"
   | "vocal_over_instrumental"
   | "echo_out"
@@ -515,4 +514,3 @@ The engine should reject invalid plans before playback whenever possible.
   ]
 }
 ```
-

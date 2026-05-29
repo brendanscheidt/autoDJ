@@ -409,7 +409,6 @@ def _phase_transition_recommendations(
     ordered_families = [
         "drop_switch",
         "layered_drop",
-        "double_drop",
         "reverb_exit",
         "simple_handoff",
     ]
@@ -456,7 +455,7 @@ def _phase_transition_recommendations(
         reason = "All consensus drop-wall anchors are strong enough for precision drop transitions."
     elif all_drop_switch_safe and "drop_switch" in allowed:
         verdict = "usable"
-        reason = "Consensus drop-wall anchors are usable for drop switches, but not strong enough for layered/double drops."
+        reason = "Consensus drop-wall anchors are usable for drop switches, but not strong enough for layered-drop transitions."
     elif "reverb_exit" in allowed:
         verdict = "risky_anchor"
         reason = "Consensus drop-wall anchors are too risky for precision drop switches; use safer transition families."

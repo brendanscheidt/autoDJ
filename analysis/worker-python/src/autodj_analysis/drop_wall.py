@@ -450,7 +450,6 @@ def _drop_wall_risk_profile(
         allowed = [
             "drop_switch",
             "layered_drop",
-            "double_drop",
             "reverb_exit",
             "simple_handoff",
         ]

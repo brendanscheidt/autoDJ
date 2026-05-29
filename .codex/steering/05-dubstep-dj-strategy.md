@@ -143,26 +143,10 @@ Typical automation:
 - If SoundStretch was used, the nudge pass must use tempo-aware source/timeline
   mapping and the rendered asset should be validated before trusting long
   beat-locked overlap.
-
-### Drop Double
-
-Use when:
-
-- Both tracks have compatible drops.
-- BPM is nearly identical or time-stretch quality is acceptable.
-- Key clash is acceptable.
-- Drops have complementary frequency/vocal content.
-
-Typical automation:
-
-- Align drops on the same downbeat.
-- Keep both audible for a short phrase.
-- Manage low end aggressively to avoid mud.
-- Choose one track as primary after the double.
-
-Risk:
-
-- This can sound bad quickly. Require high confidence and conservative duration.
+- Apply the drop-switch gain post-pass after nudging. It should compare the
+  incoming drop against the outgoing track's audible prior drop energy as well
+  as the aligned build/drop windows, then shape the incoming gain and outgoing
+  overlap trim without wet FX in the drop-switch window.
 
 ### Vocal Predrop Layer And Drop Chop
 
@@ -184,26 +168,6 @@ Risk:
 
 - Requires reliable key/chord compatibility, stem quality, vocal timing, and
   phrase-aware drop segmentation.
-
-### Frequency-Complement Drop Double
-
-Use when:
-
-- Both drops are rhythmically compatible.
-- One drop carries strong low end with sparse high end.
-- The other drop carries complementary high end with controllable low/mid
-  energy.
-
-Typical automation:
-
-- Align drops on the same downbeat.
-- Cut or reduce high end on the low-end-heavy track.
-- Cut or reduce low/mid energy on the high-end-heavy track.
-- Keep the double short unless frequency clash metrics remain strong.
-
-Risk:
-
-- Requires reliable band-energy and masking analysis, not just section labels.
 
 ### Loop Tighten
 
@@ -348,8 +312,8 @@ Current planner behavior:
   default batch filter rejects unknown key compatibility for long drop-switch
   overlaps.
 
-Key matters less for short percussion-heavy cuts and more for blends, doubles,
-and vocals.
+Key matters less for short percussion-heavy cuts and more for blends and
+vocals.
 
 ### Phrase Alignment
 
@@ -372,7 +336,7 @@ Good pairings:
 - Outgoing outro -> incoming intro.
 - Outgoing breakdown -> incoming build.
 - Outgoing build -> incoming drop.
-- Outgoing drop end -> incoming drop start for doubles or impact cuts.
+- Outgoing drop end -> incoming drop start for impact cuts.
 
 Risky pairings:
 
@@ -406,6 +370,22 @@ Low score:
 9. Compile selected transitions into deck commands and automation lanes.
 10. Validate resulting `MixPlan`.
 11. Emit annotations explaining selected and rejected transitions.
+12. Generate transition previews and require manual audition before committing
+    to a full-set render.
+
+Current Spec 011 behavior:
+
+- Use `autodj-analysis plan-set` for supported full-set generation.
+- Review `previews/index.json` and one WAV per transition before full render.
+- Render a full WAV from an accepted `mix-plan-full-set.json` rather than
+  rerunning expensive candidate/nudge search when testing long-form playback.
+- Wash-out transitions must reference the user-rendered sweep asset
+  (`C:\Users\Brendan\Desktop\sweep.wav`) unless a future accepted sweep asset
+  replaces it. Do not use the renderer's generated sine sweep for accepted
+  full-set planning.
+- Treat perceived loudness matching as POC-level. Gain planning uses broad RMS,
+  low-band energy, and drop peak matching, but does not replace a future
+  LUFS/true-peak mastering stage.
 
 ## Energy Arc
 

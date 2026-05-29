@@ -167,6 +167,68 @@ def test_gain_plan_reports_compatible_pair_as_strong_or_usable(tmp_path: Path) -
     ][0]["sourceAnchors"]
 
 
+def test_gain_plan_does_not_trim_incoming_drop_by_default(tmp_path: Path) -> None:
+    sample_rate = 8_000
+    _write_sectioned_wav(
+        tmp_path / "outgoing.wav",
+        sample_rate=sample_rate,
+        duration_seconds=16.0,
+        sections=[(0.0, 8.0, [(1_000.0, 0.12)]), (8.0, 16.0, [(90.0, 0.16), (1_000.0, 0.12)])],
+    )
+    _write_sectioned_wav(
+        tmp_path / "incoming.wav",
+        sample_rate=sample_rate,
+        duration_seconds=16.0,
+        sections=[(0.0, 8.0, [(90.0, 0.08), (1_000.0, 0.08)]), (8.0, 16.0, [(90.0, 0.45), (1_000.0, 0.25)])],
+    )
+
+    result, planned, report = _run_gain_plan(tmp_path, sample_rate=sample_rate)
+    incoming_volume = next(
+        command for command in planned["commands"] if command.get("deck") == 2 and command.get("control") == "volume"
+    )
+
+    assert result.incoming_drop_gain_db == 0.0
+    assert report["recommendedIncomingDropGainDb"] == 0.0
+    assert "incoming_drop_not_trimmed_drop_energy_is_reference" in report["reasons"]
+    assert max(keyframe["value"] for keyframe in incoming_volume["keyframes"]) == 1.0
+
+
+def test_gain_plan_boosts_incoming_when_drop_impact_peak_is_low(tmp_path: Path) -> None:
+    sample_rate = 8_000
+    _write_sectioned_wav(
+        tmp_path / "outgoing.wav",
+        sample_rate=sample_rate,
+        duration_seconds=16.0,
+        sections=[
+            (0.0, 8.0, [(1_000.0, 0.08)]),
+            (8.0, 8.25, [(90.0, 0.20), (1_000.0, 0.45)]),
+            (8.25, 16.0, [(90.0, 0.16), (1_000.0, 0.12)]),
+        ],
+    )
+    _write_sectioned_wav(
+        tmp_path / "incoming.wav",
+        sample_rate=sample_rate,
+        duration_seconds=16.0,
+        sections=[
+            (0.0, 8.0, [(90.0, 0.08), (1_000.0, 0.08)]),
+            (8.0, 8.25, [(90.0, 0.10), (1_000.0, 0.10)]),
+            (8.25, 16.0, [(90.0, 0.22), (1_000.0, 0.22)]),
+        ],
+    )
+
+    result, planned, report = _run_gain_plan(tmp_path, sample_rate=sample_rate)
+    incoming_volume = next(
+        command for command in planned["commands"] if command.get("deck") == 2 and command.get("control") == "volume"
+    )
+
+    assert result.incoming_drop_gain_db > 0.0
+    assert "incoming_drop_boost_for_peak_match" in report["reasons"]
+    assert "aDropImpact" in report["windows"]
+    assert "bDropImpact" in report["windows"]
+    assert report["comparisons"]["postGainBDropImpactPeakDb"] > report["comparisons"]["bDropImpactPeakDb"]
+    assert max(keyframe["value"] for keyframe in incoming_volume["keyframes"]) > 1.0
+
+
 def test_gain_plan_rejects_or_flags_weak_drop_after_loud_layered_build(tmp_path: Path) -> None:
     sample_rate = 8_000
     loud_build = [(90.0, 0.28), (1_000.0, 0.28)]

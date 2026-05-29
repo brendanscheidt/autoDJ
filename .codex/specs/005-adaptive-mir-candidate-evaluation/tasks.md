@@ -491,7 +491,7 @@
       policy instead of duplicated backend-local rules.
     - Recorded future transition-analysis guidance in steering:
       second-build drop swaps, vocal/acapella predrop layering with loop
-      tightening, drop chopping, and frequency-complement drop doubles.
+      tightening, drop chopping, and hard/impact cuts.
     - Verified with:
       `wsl -d Ubuntu-24.04 -- bash -lc "cd /mnt/c/Users/Brendan/Dev/AudioProj && source .venv-analysis/bin/activate && python -m pytest analysis/worker-python/tests/test_section_labels.py analysis/worker-python/tests/test_songformer_backend.py analysis/worker-python/tests/test_all_in_one_backend.py"`
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.6, 6.8, 8.1_

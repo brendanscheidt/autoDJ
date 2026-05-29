@@ -178,7 +178,14 @@ Current direction:
   drop-switch candidate selection, transient nudge/gain planning, and hard-stop
   placement truncation so old tracks do not keep playing under later
   transitions. The generator now validates that outgoing placements end at stop
-  time and that drop-switch windows stay dry.
+  time and that drop-switch windows stay dry. Spec 011 promotes this into the
+  supported `autodj-analysis plan-set` preview-first workflow with candidate,
+  validation, preview, and full-set summary reports.
+- Latest Spec 011 checkpoint renders from an accepted preview MixPlan rather
+  than rerunning pair search:
+  `.autodj-cache/full-set-poc/spec011-full-render-checkpoint-20260527-2118/render/audition.wav`.
+  The rendered set is about 21 minutes and contains 9 drop switches plus 6
+  wash-outs. Manual audition remains the final quality gate.
 
 Deliverables:
 
@@ -196,6 +203,7 @@ Success:
 - Generate a deterministic short set from analyzed tracks.
 - Audition generated transitions in the desktop app.
 - Bad transitions can be traced to analysis or strategy decisions.
+- Generate a transition preview pack before spending time on a full WAV render.
 
 ## Phase 5.5: Pitch-Preserving Tempo Control
 
@@ -270,14 +278,13 @@ Deliverables:
 
 - Loop command execution.
 - Loop-tighten transition template.
-- Drop-double candidate scoring.
 - Better low-end automation.
 - Timing tests with impulse/click fixtures.
 
 Success:
 
 - Loop-tighten into drop works on high-confidence beat grids.
-- Drop doubles are used only when compatibility is strong.
+- Drop-focused transitions remain gated by high-confidence timing evidence.
 
 ## Phase 7: Stems And Vocal-Aware Transitions
 

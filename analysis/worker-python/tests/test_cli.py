@@ -303,7 +303,10 @@ def test_cli_analyze_batch_help_lists_expected_options(capsys) -> None:
     assert "--force" in captured.out
     assert "--parameters-hash" in captured.out
     assert "--section-backend" in captured.out
+    assert "--key-backend" in captured.out
     assert "--canonical-audio-root" in captured.out
+    assert "--workers" in captured.out
+    assert "--debug-waveform-points" in captured.out
     assert "--json" in captured.out
 
 
@@ -420,6 +423,53 @@ def test_cli_render_mixplan_help_lists_expected_options(capsys) -> None:
     assert "--json" in captured.out
 
 
+def test_cli_plan_set_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["plan-set", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "--analysis-root" in captured.out
+    assert "--audio-folder" in captured.out
+    assert "--track-count" in captured.out
+    assert "--seed" in captured.out
+    assert "--max-tempo-adjustment-bpm" in captured.out
+    assert "--allow-drop-switch-tempo-stretch" in captured.out
+    assert "--max-total-stretch-bpm" in captured.out
+    assert "--candidate-search-width" in captured.out
+    assert "--max-consecutive-wash-outs" in captured.out
+    assert "--avoid-repeated-artist" in captured.out
+    assert "--emergency-fallback" in captured.out
+    assert "--min-nudge-confidence" in captured.out
+    assert "--min-stretched-drop-switch-nudge-confidence" in captured.out
+    assert "--max-drop-switch-nudge-ms" in captured.out
+    assert "--max-rendered-alignment-correction-ms" in captured.out
+    assert "--max-rendered-probe-residual-ms" in captured.out
+    assert "--washout-sweep-uri" in captured.out
+    assert "--preview-pre-seconds" in captured.out
+    assert "--preview-post-seconds" in captured.out
+    assert "--preview-fx-preroll-seconds" in captured.out
+    assert "--mode" in captured.out
+    assert "plan-preview" in captured.out
+
+
+def test_cli_preview_mixplan_help_lists_expected_options(capsys) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["preview-mixplan", "--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "mix_plan" in captured.out
+    assert "--out" in captured.out
+    assert "--asset-root" in captured.out
+    assert "--sample-rate" in captured.out
+    assert "--pre-seconds" in captured.out
+    assert "--post-seconds" in captured.out
+    assert "--fx-preroll-seconds" in captured.out
+    assert "--render" in captured.out
+    assert "--json" in captured.out
+
+
 def test_cli_rank_drop_anchors_help_lists_expected_options(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["rank-drop-anchors", "--help"])
@@ -533,6 +583,11 @@ def test_cli_nudge_mixplan_help_lists_expected_options(capsys) -> None:
     assert "--asset-root" in captured.out
     assert "--window-ms" in captured.out
     assert "--max-nudge-ms" in captured.out
+    assert "--prove-rendered-alignment" in captured.out
+    assert "--max-rendered-correction-ms" in captured.out
+    assert "--max-rendered-probe-residual-ms" in captured.out
+    assert "--min-rendered-probes" in captured.out
+    assert "--tempo-backend" in captured.out
     assert "--refined-anchor-report" not in captured.out
     assert "--use-refined-anchors" not in captured.out
     assert "--json" in captured.out
@@ -551,6 +606,12 @@ def test_cli_gain_plan_drop_switch_help_lists_expected_options(capsys) -> None:
     assert "--target-headroom-db" in captured.out
     assert "--max-overlap-gain-reduction-db" in captured.out
     assert "--drop-energy-floor-db" in captured.out
+    assert "--target-drop-loudness-tolerance-db" in captured.out
+    assert "--max-incoming-boost-db" in captured.out
+    assert "--max-incoming-trim-db" in captured.out
+    assert "--drop-peak-match-tolerance-db" in captured.out
+    assert "--max-drop-peak-match-boost-db" in captured.out
+    assert "--drop-peak-window-beats" in captured.out
     assert "--sample-rate" in captured.out
     assert "--json" in captured.out
 

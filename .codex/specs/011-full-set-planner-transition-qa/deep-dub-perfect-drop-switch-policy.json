@@ -1,0 +1,40 @@
+{
+  "name": "deep-dub-perfect-drop-switch-baseline",
+  "lockedAtUtc": "2026-05-28T14:40:00Z",
+  "sourceRun": ".autodj-cache/full-set-poc/deep-dub-full-20260528-004848",
+  "manualVerdict": "All selected drop switches were manually auditioned and reported perfect.",
+  "trackPool": {
+    "rekordboxXml": "C:/Users/Brendan/Desktop/deep_dub.xml",
+    "audioFolder": "C:/Users/Brendan/Desktop/DeepDubAutoDj",
+    "trackCount": 48
+  },
+  "policy": {
+    "seed": "deep-dub-001",
+    "candidateSearchWidth": 24,
+    "maxConsecutiveWashOuts": 48,
+    "emergencyFallback": "allow-repeated-artist",
+    "avoidRepeatedArtist": true,
+    "maxTempoAdjustmentBpm": 10.0,
+    "allowDropSwitchTempoStretch": true,
+    "dropSwitchKeyPolicy": "compatible",
+    "minNudgeConfidence": 0.58,
+    "minStretchedDropSwitchNudgeConfidence": 0.85,
+    "maxDropSwitchNudgeMs": 18.0,
+    "maxNudgeAnchorDisagreementMs": 30.0,
+    "maxRenderedAlignmentCorrectionMs": 30.0,
+    "maxRenderedProbeResidualMs": 999000.0,
+    "washoutSweepUri": "C:/Users/Brendan/Desktop/sweep.wav"
+  },
+  "result": {
+    "tracks": 48,
+    "transitions": 47,
+    "dropSwitches": 8,
+    "washOuts": 39,
+    "validationOk": true
+  },
+  "notes": [
+    "Do not replace this policy as the default drop-switch safety baseline without a manual A/B audition that preserves transient alignment quality.",
+    "This baseline intentionally favors fewer drop switches over risky alignment.",
+    "Future experiments may loosen one gate at a time, but should keep this file as the rollback point."
+  ]
+}

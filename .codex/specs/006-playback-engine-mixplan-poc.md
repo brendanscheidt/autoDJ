@@ -70,7 +70,7 @@ usable current drop end and `song_b` has a usable first beat/start.
 
 - Stem separation.
 - Vocal-aware transitions.
-- Drop doubles.
+- Layered drop variants.
 - Loop tightening.
 - Automatic full-set planning beyond a deterministic two-track or small-track
   chain POC.

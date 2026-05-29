@@ -53,13 +53,24 @@ class SelectedKeyBackend:
     def analyze_key(self, audio: DecodedAudio, context: AnalysisContext) -> KeyCandidateResult:
         start = time.perf_counter()
         madmom = _safe_run_backend(self._madmom_backend_factory, audio, context, component_name=MADMOM_KEY_BACKEND)
-        keyfinder = _safe_run_backend(
-            self._keyfinder_backend_factory,
-            audio,
-            context,
-            component_name=KEYFINDER_KEY_BACKEND,
-        )
-        selected, reason = self._select_result(madmom, keyfinder)
+        if madmom.ok and madmom.confidence >= self.madmom_confidence_threshold:
+            keyfinder = _deferred_backend_result(
+                KEYFINDER_KEY_BACKEND,
+                code="keyfinder_skipped_madmom_confident",
+                message=(
+                    f"Skipped {KEYFINDER_KEY_BACKEND} because {MADMOM_KEY_BACKEND} confidence "
+                    f"{madmom.confidence:.3f} met the production gate."
+                ),
+            )
+            selected, reason = madmom, "madmom_confident"
+        else:
+            keyfinder = _safe_run_backend(
+                self._keyfinder_backend_factory,
+                audio,
+                context,
+                component_name=KEYFINDER_KEY_BACKEND,
+            )
+            selected, reason = self._select_result(madmom, keyfinder)
         processing_seconds = _elapsed(start)
 
         if selected is None:
@@ -171,6 +182,18 @@ def _safe_run_backend(
                 details={"exceptionType": exc.__class__.__name__},
             ),
         )
+
+
+def _deferred_backend_result(component_name: str, *, code: str, message: str) -> KeyCandidateResult:
+    return KeyCandidateResult(
+        status="deferred",
+        provenance=CandidateProvenance(backend_name=component_name, backend_version=__version__),
+        error=BackendExecutionError(
+            code=code,
+            message=message,
+            backend_name=component_name,
+        ),
+    )
 
 
 def _selection_warnings(

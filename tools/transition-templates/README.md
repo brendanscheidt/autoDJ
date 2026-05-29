@@ -50,7 +50,6 @@ Interpolation words:
 ## Template Types
 
 - `specific-drop-switch.transition.txt`: exact two-song drop switch. The parser aligns `song_b.drop_start` to `song_a.drop_start`.
-- `specific-double-drop.transition.txt`: exact two-song double drop. The parser aligns `song_b.drop_start` to `song_a.drop_start` and preserves your deck automation through both drops.
 - `specific-reverb-exit.transition.txt`: exact two-song reverb exit. The parser aligns `song_b.first_beat` to `song_a.drop_end`.
 - `generic-drop-switch.recipe.txt`: reusable drop-switch recipe with semantic anchors and expressions.
 - `generic-reverb-exit.recipe.txt`: reusable reverb-exit recipe with semantic anchors and expressions.

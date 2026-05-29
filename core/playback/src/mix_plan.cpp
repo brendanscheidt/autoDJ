@@ -588,9 +588,6 @@ void addWarning(PlanValidationResult& result, std::string code, std::string mess
     if (value == "wash_out") {
         return TransitionTechnique::WashOut;
     }
-    if (value == "drop_double") {
-        return TransitionTechnique::DropDouble;
-    }
     if (value == "loop_tighten") {
         return TransitionTechnique::LoopTighten;
     }
@@ -1308,8 +1305,6 @@ std::string toString(const TransitionTechnique technique) {
             return "drop_end_reverb_exit";
         case TransitionTechnique::WashOut:
             return "wash_out";
-        case TransitionTechnique::DropDouble:
-            return "drop_double";
         case TransitionTechnique::LoopTighten:
             return "loop_tighten";
         case TransitionTechnique::VocalOverInstrumental:

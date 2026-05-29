@@ -517,7 +517,7 @@
 
 - [x] 12. Tighten POC behavior after manual verdict
   - Fix only issues required to make the two MVP templates audibly coherent.
-  - Avoid adding stems, drop doubles, loop tightening, or broad set planning.
+  - Avoid adding stems, layered drop variants, loop tightening, or broad set planning.
   - Update debug annotations for any newly discovered failure modes.
   - Completion notes, 2026-05-19:
     - Updated the second-build drop switch template to make the incoming deck
