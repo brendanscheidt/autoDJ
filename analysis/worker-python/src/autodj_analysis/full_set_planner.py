@@ -1741,6 +1741,7 @@ def merge_pair_plans(
         pair_incoming = placements_by_id[transition["toPlacementId"]]
         old_out_deck = int(pair_outgoing["deck"])
         old_in_deck = int(pair_incoming["deck"])
+        pair_timeline_start = float(pair_outgoing["timelineStartSeconds"])
 
         if current is None:
             current = CurrentPlacement(
@@ -1757,7 +1758,7 @@ def merge_pair_plans(
         def map_time(value: float | int | None) -> float | None:
             if value is None:
                 return None
-            return current.timeline_start + (float(value) - current.source_start) / current.tempo_ratio
+            return current.timeline_start + (float(value) - pair_timeline_start) / current.tempo_ratio
 
         id_map: dict[str, str] = {pair_outgoing["placementId"]: current.placement_id}
 

@@ -453,6 +453,117 @@ def test_merge_pair_plans_uses_configured_washout_sweep_uri(tmp_path: Path) -> N
     assert sweep_asset["sourceUri"] == "C:/Users/Brendan/Desktop/sweep.wav"
 
 
+def test_merge_pair_plans_maps_later_pair_times_from_pair_timeline_origin(tmp_path: Path) -> None:
+    pair_one = {
+        "assets": [
+            {"trackId": "track-a", "sourceUri": "track-a.wav"},
+            {"trackId": "track-b", "sourceUri": "track-b.wav"},
+        ],
+        "tracks": [
+            {
+                "placementId": "pair1-a",
+                "trackId": "track-a",
+                "deck": 1,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 8.0,
+                "sourceStartSeconds": 0.0,
+            },
+            {
+                "placementId": "pair1-b",
+                "trackId": "track-b",
+                "deck": 2,
+                "timelineStartSeconds": 8.0,
+                "timelineEndSeconds": 40.0,
+                "sourceStartSeconds": 32.0,
+            },
+        ],
+        "transitions": [
+            {
+                "transitionId": "transition-001",
+                "templateId": "drop_end_wash_out_v1",
+                "fromPlacementId": "pair1-a",
+                "toPlacementId": "pair1-b",
+                "timelineStartSeconds": 4.0,
+                "timelineEndSeconds": 8.0,
+                "handoffTimelineSeconds": 8.0,
+            }
+        ],
+        "commands": [
+            {"type": "stop", "at": 8.0, "deck": 1},
+            {"type": "play", "at": 8.0, "deck": 2, "placementId": "pair1-b"},
+        ],
+        "annotations": [{"at": 4.0, "text": "pair-one", "placementId": "pair1-a"}],
+    }
+    pair_two = {
+        "assets": [
+            {"trackId": "track-b", "sourceUri": "track-b.wav"},
+            {"trackId": "track-c", "sourceUri": "track-c.wav"},
+        ],
+        "tracks": [
+            {
+                "placementId": "pair2-b",
+                "trackId": "track-b",
+                "deck": 2,
+                "timelineStartSeconds": 0.0,
+                "timelineEndSeconds": 16.0,
+                "sourceStartSeconds": 32.0,
+            },
+            {
+                "placementId": "pair2-c",
+                "trackId": "track-c",
+                "deck": 1,
+                "timelineStartSeconds": 12.0,
+                "timelineEndSeconds": 44.0,
+                "sourceStartSeconds": 0.0,
+            },
+        ],
+        "transitions": [
+            {
+                "transitionId": "transition-002",
+                "templateId": "drop_end_wash_out_v1",
+                "fromPlacementId": "pair2-b",
+                "toPlacementId": "pair2-c",
+                "timelineStartSeconds": 12.0,
+                "timelineEndSeconds": 16.0,
+                "handoffTimelineSeconds": 16.0,
+            }
+        ],
+        "commands": [
+            {"type": "stop", "at": 16.0, "deck": 2},
+            {"type": "play", "at": 12.0, "deck": 1, "placementId": "pair2-c"},
+        ],
+        "annotations": [{"at": 12.0, "text": "pair-two", "placementId": "pair2-c"}],
+    }
+    pair_one_path = tmp_path / "pair-one.json"
+    pair_two_path = tmp_path / "pair-two.json"
+    pair_one_path.write_text(json.dumps(pair_one), encoding="utf-8")
+    pair_two_path.write_text(json.dumps(pair_two), encoding="utf-8")
+
+    full_plan = merge_pair_plans(
+        [
+            {"kind": "wash-out", "final_plan_path": pair_one_path},
+            {"kind": "wash-out", "final_plan_path": pair_two_path},
+        ],
+        "test-run",
+        washout_sweep_uri="generated://autodj/fx/washout-sweep-v1.wav",
+    )
+
+    second_transition = next(
+        transition for transition in full_plan["transitions"] if transition["transitionId"] == "set-002-transition-002"
+    )
+    assert second_transition["timelineStartSeconds"] == 20.0
+    assert second_transition["timelineEndSeconds"] == 24.0
+    assert second_transition["handoffTimelineSeconds"] == 24.0
+
+    incoming_placement = next(
+        placement for placement in full_plan["tracks"] if placement["placementId"] == "set-002-pair2-c"
+    )
+    assert incoming_placement["timelineStartSeconds"] == 20.0
+
+    pair_two_annotation = next(annotation for annotation in full_plan["annotations"] if annotation["text"] == "pair-two")
+    assert pair_two_annotation["at"] == 20.0
+
+
 def test_source_uri_resolvable_accepts_absolute_paths(tmp_path: Path) -> None:
     sweep = tmp_path / "sweep.wav"
     sweep.write_bytes(b"RIFF")
